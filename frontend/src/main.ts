@@ -176,8 +176,13 @@ socket.onMessage((msg) => {
 
   if (type === "config") {
     muteMicDuringSpeech = Boolean(msg.muteMicDuringSpeech);
-    // `stt` is only present when the server runs the local recogniser.
-    voiceInput.setMode(msg.stt === "local" ? "local" : "browser");
+    // `stt` is only present when the server can run the local recogniser:
+    // "local" means use it; "auto" means use it only if this browser has no
+    // recogniser of its own (Firefox), and keep Chrome's otherwise.
+    const hasBrowserRecogniser = Boolean(
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+    const useLocal = msg.stt === "local" || (msg.stt === "auto" && !hasBrowserRecogniser);
+    voiceInput.setMode(useLocal ? "local" : "browser");
   } else if (type === "audio") {
     const data = msg.data as string;
     if (data) {

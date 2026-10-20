@@ -75,9 +75,21 @@ FLOOR_ALPHA = 0.05          # how fast the floor follows quiet frames
 
 # ── configuration (read at call time, so tests and .env edits just work) ──
 
+_PROMPTS = {
+    "es": "Conversación con JARVIS, el asistente de la casa. Jarvis, señor.",
+    "en": "A conversation with JARVIS, the house assistant. Jarvis, sir.",
+}
+
+
 def requested_mode() -> str:
+    """`browser` (default), `local`, or `auto`.
+
+    `auto` offers the local recogniser to pages that have no recogniser of
+    their own: Chrome keeps using its Web Speech API, Firefox (which has none)
+    gets the local one. The page decides; the server only says it is available.
+    """
     raw = os.environ.get("JARVIS_STT", "browser").strip().lower()
-    return raw if raw in ("browser", "local") else "browser"
+    return raw if raw in ("browser", "local", "auto") else "browser"
 
 
 def wake_requested() -> bool:
@@ -151,17 +163,23 @@ def wake_enabled() -> bool:
 
 
 def mode() -> str:
-    """`local` only when it was asked for and faster-whisper is importable;
+    """`local` or `auto` only when asked for and faster-whisper is importable;
     otherwise `browser`, so a half-installed setup still has a microphone."""
-    if requested_mode() == "local" and whisper_installed():
-        return "local"
+    wanted = requested_mode()
+    if wanted in ("local", "auto") and whisper_installed():
+        return wanted
     return "browser"
+
+
+def offers_local() -> bool:
+    """Will `/ws/mic` accept a microphone: `local` and `auto` both do."""
+    return mode() in ("local", "auto")
 
 
 def problems() -> list[str]:
     """What stops the requested configuration from working, in words.
     Empty when nothing was asked for or everything is in place."""
-    if requested_mode() != "local":
+    if requested_mode() not in ("local", "auto"):
         return []
     out = []
     if not whisper_installed():
@@ -383,9 +401,13 @@ class _WhisperEngine:
     def transcribe(self, pcm: bytes, language: str) -> str:
         import numpy as np                                # a faster-whisper dependency
         audio = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
+        # Without a hint Whisper writes "Harbys" for "Jarvis": a proper noun it
+        # has no reason to expect. The prompt and hotword fix that (measured).
         segments, _info = self._model.transcribe(
             audio, language=language, beam_size=1,
-            condition_on_previous_text=False, vad_filter=True)
+            condition_on_previous_text=False, vad_filter=True,
+            initial_prompt=_PROMPTS.get(language, _PROMPTS["en"]),
+            hotwords="Jarvis")
         return " ".join(s.text.strip() for s in segments).strip()
 
 
