@@ -36,7 +36,7 @@ def _never_post_a_real_notification(monkeypatch, request):
     hand the real implementation back. test_notifier.py is exempt: it tests
     notify() itself and mocks the subprocess boundary directly.
     """
-    if request.module.__name__.endswith("test_notifier"):
+    if request.module.__name__.endswith(("test_notifier", "test_linux_port")):
         return
     import notifier
 

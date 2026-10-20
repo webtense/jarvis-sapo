@@ -100,10 +100,12 @@ def test_editor_falls_back_to_xdg_open(as_linux, monkeypatch):
 
 # ── screen ──────────────────────────────────────────────────────────────────
 
-GNOME_RAW = ("""('[{"in_current_workspace":true,"wm_class":"gnome-terminal-server",'
-             '"title":"~/jarvis","focus":true,"id":1},'
-             '{"wm_class":"Google-chrome","title":"JARVIS","focus":false,"id":2},'
-             '{"wm_class":"x","title":"","focus":false,"id":3}]',)""")
+GNOME_RAW = "(" + repr(json.dumps([
+    {"in_current_workspace": True, "wm_class": "gnome-terminal-server",
+     "title": "~/jarvis", "focus": True, "id": 1},
+    {"wm_class": "Google-chrome", "title": "JARVIS", "focus": False, "id": 2},
+    {"wm_class": "x", "title": "", "focus": False, "id": 3},
+])) + ",)"
 
 
 def test_parse_gnome_windows():
