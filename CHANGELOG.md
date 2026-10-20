@@ -3,6 +3,13 @@
 Fork de [ethanplusai/jarvis](https://github.com/ethanplusai/jarvis) (© 2026 Ethan Rogers) orientado a Ubuntu/Linux.
 Versionado semántico con prefijo `ubuntu-`. Uso personal y no comercial, igual que la licencia original.
 
+## ubuntu-0.5.0 — voz local, puente MCP, casa en solo lectura
+- **F2c** voz de entrada local opcional (`JARVIS_STT=local`, faster-whisper) y palabra de activación "Hey Jarvis" (openWakeWord, `JARVIS_WAKE_WORD=on`). Desactivado por defecto; sin los paquetes opcionales todo sigue igual. Endpoint `/ws/mic` tras la misma puerta Origin/Host; el texto final entra por `_handle_final_transcript`.
+- **F3** puente MCP para sesiones de Claude Code (`jarvis_speak`, `jarvis_ask_user`, `jarvis_notify`, `jarvis_remember`): token propio y limitado, límites de frecuencia y longitud, texto siempre atribuido y tratado como no confiable. `jarvis_remember` solo propone: el usuario confirma por voz o en el panel, y por voz nunca sustituye una memoria existente.
+- **F4** Home Assistant en solo lectura (`ha_readonly_mcp.py`: solo GET, rutas permitidas, sin seguir redirecciones, token por fichero 600) y ejemplo para el MCP de BTR; los runs sin supervisión no heredan estas credenciales.
+- **F5** limpieza: eliminado `work_mode.py`, `JARVIS_SKIP_APT=1` en el instalador, comprobación de Python/Node, sección Ubuntu del README y CI sin ejecuciones duplicadas (push solo en `main`).
+- Conocido y pendiente: reconexión en bucle de `/ws/mic` con dos pestañas abiertas y carga bloqueante del modelo de la palabra de activación (ver auditoría de F2c); voz local sin probar con micrófono real.
+
 ## ubuntu-0.4.1 — JARVIS residente
 - `scripts/install-service.sh` + `scripts/jarvis.service`: servicio de sistema (arranca con el equipo, se reinicia si cae). La unidad vive en /etc para que un rsync `--delete` del perfil no pueda borrarla.
 

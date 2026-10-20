@@ -130,9 +130,6 @@ arbitrary LLM and file content, so everything goes through
   subprocess)
 - `project_maker.py` — Creates a new project directory from a spoken name,
   path-validated against the projects root
-- `work_mode.py` — Vestigial. `is_casual_question` is imported by `server.py`
-  and called by nothing; the Haiku-vs-`claude -p` routing it classified for is
-  gone. Left in place only because a test pins it
 - `data_paths.py` — Single source of truth for where data is written
 
 ## Where the author's own notes live
@@ -224,6 +221,9 @@ Fork de ethanplusai/jarvis para Ubuntu/Linux. Todo lo de arriba sigue valiendo; 
 - **Plataforma**: `host.py` (`is_linux()`, `is_wayland()`). Cada módulo que antes era solo macOS (`actions`, `screen`, `dialog`, `notifier`, `preflight`) conserva intacto su camino macOS y añade una rama Linux. Los tests fijan `host.is_linux` a False por defecto (`tests/conftest.py`); los de Linux usan la fixture `as_linux`.
 - **Voz**: `tts.py` tiene dos proveedores, Fish y Piper (local, `requirements-linux.txt`). `provider()` elige solo. Voces en `data/voices/` (ignorado por git).
 - **Idioma**: `lang.py`, `JARVIS_LANGUAGE=en|es`. Persona en `jarvis_home/CLAUDE.es.md`; si cambias `CLAUDE.md` en inglés, revisa también la versión es.
+- **Voz de entrada local** (opt-in, `JARVIS_STT=local`): `stt_local.py` + `/ws/mic` + `frontend/src/localmic.ts`; los finales entran por `_handle_final_transcript`, el mismo camino que el reconocedor del navegador. Ver `docs/stt-local.md`.
+- **Puente MCP** (`jarvis_bridge_mcp.py`, rutas `/internal/bridge/*`): token propio y limitado (`data/bridge-token`), nada que actúe; `jarvis_remember` solo propone y confirma el usuario. Ver `docs/bridge.md`.
+- **Casa/BTR solo lectura** (`ha_readonly_mcp.py`, ejemplos en `jarvis_home/connections.examples/`): el token va en un fichero 600 (`HA_TOKEN_FILE`), `claude_env.run_env()` lo quita de los runs. Ver `docs/connections-casa-btr.md`.
 - **Permisos en otras sesiones**: vía tmux (`dialog.py`), solo si la sesión corre con `scripts/jarvis-claude`.
 - **Scripts**: `install-ubuntu.sh`, `start-ubuntu.sh` (puerto fijo 5173), `install-service.sh` + `jarvis.service` (servicio de sistema).
 - **Flujo de trabajo** (/btr-baseprogramacion): rama corta → PR → CI en verde (macOS + Ubuntu + gitleaks) → squash. Versionado `ubuntu-X.Y.Z` en CHANGELOG.md. Los tests solo se ejecutan en CI.
