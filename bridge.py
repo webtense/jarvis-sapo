@@ -64,7 +64,10 @@ RATE_LIMITS = {
 DEDUP_WINDOW = 30.0                # the same text twice in this long is ignored
 MAX_QUEUED_SPEECH = 4              # bridge utterances waiting to be spoken
 MAX_PROPOSALS = 20                 # pending memories; the oldest falls off
-CONFIRM_WINDOW = 120.0             # a spoken "shall I keep it?" is open this long
+# A spoken "shall I keep it?" is open this long AFTER it was fully played, and
+# only until the brain says something else (`note_brain_turn`). Short on
+# purpose: a "yes" that late is more likely meant for somebody else.
+CONFIRM_WINDOW = 15.0
 
 # Newlines and tabs stay: the TTS cleaner turns them into pauses.
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
@@ -247,6 +250,7 @@ class Bridge:
         self._queued: list = []                    # utterances not yet spoken
         self.question: Optional[Question] = None
         self.proposals: dict[str, Proposal] = {}
+        self._brain_epoch = 0          # bumped each time the brain starts talking
 
     # -- admission --------------------------------------------------------
     def admit(self, kind: str, text: str) -> None:
@@ -317,10 +321,28 @@ class Bridge:
         self.proposals[p.id] = p
         return p
 
-    def mark_announced(self, pid: str) -> None:
+    @property
+    def brain_epoch(self) -> int:
+        return self._brain_epoch
+
+    def mark_announced(self, pid: str, epoch: Optional[int] = None) -> None:
+        """The proposal has been SAID in full. Call it only then: queued is
+        not heard, and a cancelled announcement was never asked. `epoch` is
+        `brain_epoch` as read BEFORE the wait; if the brain spoke in between,
+        the user's next "yes" is an answer to the brain, not to this."""
+        if epoch is not None and epoch != self._brain_epoch:
+            return
         p = self.proposals.get(pid)
         if p is not None:
             p.announced_at = self._clock()
+
+    def note_brain_turn(self) -> None:
+        """The brain started talking: whatever question the user may now be
+        answering is the brain's. Every announced proposal stops listening for
+        a yes/no (it stays pending, decidable on the dashboard)."""
+        self._brain_epoch += 1
+        for p in self.proposals.values():
+            p.announced_at = None
 
     def awaiting_decision(self) -> Optional[Proposal]:
         """The proposal JARVIS last asked about, while that ask is fresh."""

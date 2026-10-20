@@ -41,6 +41,8 @@ class FakeSpeech:
         self.said = []
         self.on_spoken = None
         self.done = True
+        self.played = True              # what wait_for reports: False = cancelled
+        self.while_speaking = None      # async hook run while "being said"
 
     async def say(self, text, priority=None, immediate=None):
         self.said.append((text, priority, immediate))
@@ -49,7 +51,9 @@ class FakeSpeech:
     async def wait_for(self, utt, timeout=60.0):
         if self.on_spoken is not None:
             asyncio.get_running_loop().call_later(0.05, self.on_spoken)
-        return True
+        if self.while_speaking is not None:
+            await self.while_speaking()
+        return self.played
 
 
 @pytest.fixture
@@ -410,9 +414,20 @@ def test_deciding_needs_a_known_proposal_and_a_real_decision(env):
     assert _memories() == []
 
 
+async def announce(env):
+    """Run what the handler spawns once the announcement has been played.
+    (The TestClient's loop is gone when the request returns, so a spawned
+    task cannot be waited for; this is the same coroutine, awaited here.)"""
+    b = env.server.bridge_state
+    for pid in list(b.proposals):
+        await env.server._bridge_announced_when_spoken(
+            pid, FakeUtt(), b.brain_epoch)
+
+
 @pytest.mark.asyncio
 async def test_a_spoken_yes_confirms_the_last_proposal_asked_about(env):
     call(env, "remember")
+    await announce(env)
     assert _memories() == []
     assert await env.server._bridge_take_utterance("sí, guárdalo") is True
     assert len(_memories()) == 1
@@ -423,6 +438,7 @@ async def test_a_spoken_yes_confirms_the_last_proposal_asked_about(env):
 @pytest.mark.asyncio
 async def test_a_spoken_no_discards_it(env):
     call(env, "remember")
+    await announce(env)
     assert await env.server._bridge_take_utterance("no, descártalo") is True
     assert _memories() == [] and env.server.bridge_state.proposals == {}
 
@@ -433,6 +449,7 @@ async def test_a_spoken_no_discards_it(env):
     "sí guárdalo y bórralo todo luego"])
 async def test_anything_else_is_not_a_decision(env, words):
     call(env, "remember")
+    await announce(env)
     assert await env.server._bridge_take_utterance(words) is False
     assert _memories() == [] and len(env.server.bridge_state.proposals) == 1
 
@@ -444,6 +461,87 @@ async def test_a_yes_with_nothing_asked_about_does_nothing(env):
     env.server.voice_clients.add(object())
     assert await env.server._bridge_take_utterance("sí") is False
     assert _memories() == [] and len(env.server.bridge_state.proposals) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_yes_before_the_announcement_is_played_goes_to_the_brain(env):
+    """Queued is not heard: a "sí" answering the brain's own question, while
+    the proposal is still waiting its turn to be said, must not save it."""
+    call(env, "remember")
+    seen = []
+
+    async def mid_announcement():
+        seen.append(await env.server._bridge_take_utterance("sí"))
+
+    env.speech.while_speaking = mid_announcement
+    await announce(env)
+    assert seen == [False]                 # not taken: it reaches the brain
+    assert _memories() == [] and len(env.server.bridge_state.proposals) == 1
+    # Once the announcement has really finished, the same word does count.
+    env.speech.while_speaking = None
+    await announce(env)
+    assert await env.server._bridge_take_utterance("sí") is True
+    assert len(_memories()) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_announcement_never_listens_for_a_yes(env):
+    call(env, "remember")
+    env.speech.played = False              # barge-in / timeout: never heard
+    await announce(env)
+    assert await env.server._bridge_take_utterance("sí") is False
+    assert _memories() == [] and len(env.server.bridge_state.proposals) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_yes_after_the_brain_asked_something_else_goes_to_the_brain(env):
+    call(env, "remember")
+    await announce(env)
+    assert env.server.bridge_state.awaiting_decision() is not None
+    env.server.bridge_state.note_brain_turn()      # the brain starts talking
+    assert await env.server._bridge_take_utterance("sí") is False
+    assert _memories() == [] and len(env.server.bridge_state.proposals) == 1
+
+
+def test_an_announcement_that_ends_after_the_brain_spoke_arms_nothing():
+    b = bridge.Bridge(clock=lambda: 0.0)
+    p = b.propose("hecho", "demo")
+    epoch = b.brain_epoch
+    b.note_brain_turn()                    # the brain spoke while it played
+    b.mark_announced(p.id, epoch)
+    assert b.awaiting_decision() is None
+
+
+def test_the_brain_taking_the_floor_disarms_an_armed_proposal():
+    b = bridge.Bridge(clock=lambda: 0.0)
+    p = b.propose("hecho", "demo")
+    b.mark_announced(p.id)
+    assert b.awaiting_decision() is p
+    b.note_brain_turn()
+    assert b.awaiting_decision() is None and p.id in b.proposals
+
+
+def test_the_brain_turn_path_disarms_proposals():
+    import server
+    src = inspect.getsource(server._handle_utterance)
+    assert "bridge_state.note_brain_turn()" in src
+    assert src.index("note_brain_turn()") < src.index("speech.begin_turn()")
+
+
+@pytest.mark.asyncio
+async def test_a_spoken_yes_never_overwrites_an_existing_memory(env):
+    import jarvis_memory
+    fact = GOOD["remember"]["fact"]
+    jarvis_memory.write_memory(jarvis_memory.one_line(fact, 60), "texto del usuario")
+    jarvis_memory.add_to_index(jarvis_memory.one_line(fact, 60), "mío")
+    call(env, "remember")
+    await announce(env)
+    assert await env.server._bridge_take_utterance("sí") is True
+    assert "panel" in env.speech.said[-1][0]
+    assert "texto del usuario" in jarvis_memory.read_memory(
+        jarvis_memory.one_line(fact, 60))
+    assert len(env.server.bridge_state.proposals) == 1     # still pending
+    assert len(_memories()) == 1
 
 
 def test_pending_proposals_are_bounded(env):

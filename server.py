@@ -1649,6 +1649,9 @@ async def _handle_utterance(text: str) -> None:
             line = "One moment, sir — my language systems are still starting."
         await speech.say(line, Priority.NORMAL)
         return
+    # The brain is about to speak: a pending "keep this memory?" is no longer
+    # the last question the user heard, so a "yes" must reach the brain.
+    bridge_state.note_brain_turn()
     utt = speech.begin_turn()
     try:
         try:
@@ -6496,16 +6499,46 @@ async def bridge_remember(request: Request):
     except bridge.Refused as e:
         return _bridge_reply(False, str(e))
     proposal = bridge_state.propose(fact, label)
+    epoch = bridge_state.brain_epoch
     utt = await _bridge_say(bridge.frame_remember(label, fact),
                             priority=Priority.NORMAL, immediate=False)
     if utt is not None:
-        bridge_state.mark_announced(proposal.id)
+        # Queued is not asked: the proposal only starts listening for a
+        # spoken yes once the announcement has been played whole.
+        _spawn(_bridge_announced_when_spoken(proposal.id, utt, epoch))
     return _bridge_reply(True, "Propuesta pendiente: no se guardará en la "
                                "memoria hasta que el usuario la confirme.")
 
 
-async def _bridge_decide(pid: str, accept: bool) -> str:
+async def _bridge_announced_when_spoken(pid: str, utt, epoch: int) -> None:
+    """Arm a proposal for a spoken yes/no once its announcement was heard in
+    full. A cancelled, timed-out or interrupted announcement arms nothing."""
+    try:
+        ok = await speech.wait_for(utt, timeout=bridge.SPEAK_WAIT_MAX)
+    except Exception as e:
+        log.warning("bridge: waiting for a proposal announcement failed: %s", e)
+        return
+    if ok:
+        bridge_state.mark_announced(pid, epoch)
+
+
+def _bridge_memory_exists(fact: str) -> bool:
+    """Would saving `fact` overwrite a memory that is already there?
+    `add_to_index` / `write_memory` update in place when the title matches."""
+    slug = jarvis_memory.slugify(jarvis_memory.one_line(fact, 60))
+    return (slug in jarvis_memory.list_memories()
+            or any(e["slug"] == slug for e in jarvis_memory.index_entries()))
+
+
+async def _bridge_decide(pid: str, accept: bool, *, spoken: bool = False) -> str:
     """The user's decision on one proposal. The only write in the bridge."""
+    if spoken and accept:
+        pending = bridge_state.proposals.get(pid)
+        if pending is not None and _bridge_memory_exists(pending.fact):
+            # A spoken "yes" is a thin consent for REPLACING something the
+            # user already keeps: that one is confirmed on the dashboard.
+            return ("Ya existe una memoria con ese título; confírmala en el "
+                    "panel si quieres sustituirla.")
     proposal = bridge_state.take(pid)
     if proposal is None:
         return "Esa propuesta ya no está pendiente."
@@ -6538,7 +6571,7 @@ async def _bridge_take_utterance(text: str) -> bool:
     decision = bridge.classify_decision(text)
     if decision is None:
         return False
-    line = await _bridge_decide(proposal.id, decision == "yes")
+    line = await _bridge_decide(proposal.id, decision == "yes", spoken=True)
     if speech is not None:
         await speech.say(line, Priority.NORMAL)
     return True
