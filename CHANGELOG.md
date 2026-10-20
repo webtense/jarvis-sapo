@@ -3,6 +3,13 @@
 Fork de [ethanplusai/jarvis](https://github.com/ethanplusai/jarvis) (© 2026 Ethan Rogers) orientado a Ubuntu/Linux.
 Versionado semántico con prefijo `ubuntu-`. Uso personal y no comercial, igual que la licencia original.
 
+## ubuntu-0.4.0 — F2b castellano (`JARVIS_LANGUAGE=es`)
+- `lang.py`: `JARVIS_LANGUAGE` (`en` por defecto, `es`) elige persona, voz Piper y locale del reconocimiento.
+- `jarvis_home/CLAUDE.es.md`: persona traducida (mismas reglas y herramientas); cambiar de idioma sustituye la copia del cerebro solo si el usuario no la ha editado.
+- Voz por idioma: `es_ES-davefx-medium` / `en_GB-alan-medium` (mayordomo británico).
+- El navegador escucha en `es-ES` (`VITE_JARVIS_LANG`, lo fija `start-ubuntu.sh`).
+- Las frases fijas del código siguen en inglés a propósito: casi todas son resultados de herramientas que el cerebro dice con sus palabras.
+
 ## ubuntu-0.3.0 — F2a voz local (Piper)
 - `tts.py` con dos proveedores: Fish Audio (original) y Piper local, sin clave ni red. Elección automática (`JARVIS_TTS_PROVIDER=auto|fish|piper|none`): Fish si hay clave real, si no Piper, si no solo texto.
 - Piper es dependencia opcional (`requirements-linux.txt`), cargada en diferido; la voz se precarga al arrancar (~1,5 s una vez, luego ~0,05–0,2 s por frase).

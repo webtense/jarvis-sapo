@@ -229,7 +229,8 @@ export function createVoiceInput(
     const sr = new SR();
     sr.continuous = true;
     sr.interimResults = true;
-    sr.lang = "en-US";
+    // Set by scripts/start-ubuntu.sh from JARVIS_LANGUAGE (es -> es-ES).
+    sr.lang = (import.meta as any).env?.VITE_JARVIS_LANG || "en-US";
     const e: Engine = { sr, running: false, audio: false, startedAt: 0, stoppedAt: 0, retired: false };
 
     sr.onstart = () => {
