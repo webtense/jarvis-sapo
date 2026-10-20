@@ -46,6 +46,28 @@ VOICE="${PIPER_VOICE:-$DEFAULT_VOICE}"
 [[ -f "data/voices/$VOICE.onnx" ]] || \
   .venv/bin/python -m piper.download_voices --download-dir data/voices "$VOICE"
 
+# Reconocimiento de voz LOCAL y palabra de activación (opcional, desactivado).
+# Uso: JARVIS_INSTALL_STT=1 scripts/install-ubuntu.sh
+# Instala faster-whisper y openWakeWord y descarga los modelos (~150 MB el
+# base multilingüe, más el modelo hey_jarvis). Después, en .env:
+#   JARVIS_STT=local      JARVIS_WAKE_WORD=on      (JARVIS_STT_MODEL=base)
+if [[ "${JARVIS_INSTALL_STT:-0}" == "1" ]]; then
+  echo "==> Reconocimiento de voz local (faster-whisper + openWakeWord)"
+  .venv/bin/pip install --quiet faster-whisper openwakeword onnxruntime
+  STT_MODEL="${JARVIS_STT_MODEL:-base}"
+  STT_MODEL="${STT_MODEL%.en}"   # en castellano, nunca el modelo solo-inglés
+  .venv/bin/python - "$STT_MODEL" <<'PY'
+import sys
+import data_paths
+from faster_whisper.utils import download_model
+d = data_paths.data_dir() / "stt"
+d.mkdir(parents=True, exist_ok=True)
+download_model(sys.argv[1], cache_dir=str(d))
+import openwakeword.utils
+openwakeword.utils.download_models(["hey_jarvis"])
+PY
+fi
+
 echo "==> Frontend"
 command -v npm >/dev/null || { echo "ERROR: falta npm (instala nodejs y npm, Node 18 o superior)." >&2; exit 1; }
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"

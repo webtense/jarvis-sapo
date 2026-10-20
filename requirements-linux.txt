@@ -2,3 +2,10 @@
 # or Fish Audio if you have a key). Install with:
 #   pip install -r requirements.txt -r requirements-linux.txt
 piper-tts>=1.3.0
+
+# Local speech recognition (JARVIS_STT=local) and the "Jarvis" wake word.
+# Optional and off by default; scripts/install-ubuntu.sh installs them when run
+# with JARVIS_INSTALL_STT=1. Uncomment to install by hand.
+# faster-whisper>=1.0.0
+# openwakeword>=0.6.0
+# onnxruntime>=1.16

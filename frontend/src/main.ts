@@ -95,6 +95,10 @@ const voiceInput = createVoiceInput(
     // browser-side failure the server cannot otherwise see at all, and the
     // console it used to be confined to is never open when it happens.
     socket.send({ type: "mic", text: event });
+  },
+  () => {
+    // Local recognition: the server heard a phrase and already acted on it.
+    micMonitor.sawSpeech();
   }
 );
 
@@ -117,7 +121,11 @@ const micMonitor = createMicMonitor(
     // Proven deaf: sound going in, nothing coming out. Do not wait for the
     // rotation timer to happen along — measured once at 21 seconds, all of
     // it lost. Rebuild the recogniser now.
-    if (event.startsWith("DEAF")) voiceInput.restart("deaf: audio in, no results");
+    // Not in local mode: with a wake word, sound in and no transcript is the
+    // normal state of a room, not a recogniser that has gone deaf.
+    if (event.startsWith("DEAF") && voiceInput.mode() !== "local") {
+      voiceInput.restart("deaf: audio in, no results");
+    }
   }
 );
 
@@ -168,6 +176,8 @@ socket.onMessage((msg) => {
 
   if (type === "config") {
     muteMicDuringSpeech = Boolean(msg.muteMicDuringSpeech);
+    // `stt` is only present when the server runs the local recogniser.
+    voiceInput.setMode(msg.stt === "local" ? "local" : "browser");
   } else if (type === "audio") {
     const data = msg.data as string;
     if (data) {

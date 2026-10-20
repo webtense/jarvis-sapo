@@ -68,6 +68,7 @@ import actions
 import bridge
 import builds
 import preflight
+import stt_local
 import project_maker
 import projects_view
 import repo_read
@@ -6856,6 +6857,46 @@ def _scan_projects_sync() -> list[dict]:
 
 # -- WebSocket Voice Handler -----------------------------------------------
 
+async def _handle_final_transcript(raw_text: str) -> None:
+    """A finished sentence from the user, from whichever recogniser heard it.
+
+    Shared by `/ws/voice` (the browser's Web Speech results) and `/ws/mic`
+    (the local recogniser), so turn handling, echo rejection and
+    interruption are written once.
+    """
+    assert speech is not None
+    text = apply_speech_corrections(raw_text.strip())
+    if not text:
+        return
+    verdict = await speech.user_final(text)
+    if verdict == "replay":
+        # "Say that again": resend what was already synthesized —
+        # no brain turn, so no cost and no risk of coming back
+        # with different words. Never routed to _handle_utterance.
+        log.info(f"User (replay): {text}")
+        if not await speech.replay_last():
+            await speech.say(NOTHING_TO_REPLAY_LINE, Priority.NORMAL)
+        return
+    if verdict != "speech":
+        # Say WHY, so a dropped sentence can be diagnosed from the
+        # log alone. Live, "User (echo, ignored): now" was the first
+        # word of the user's reply being eaten, and it took a
+        # transcript read-through to see that -- the age of the
+        # last played chunk is the fact that decides it.
+        since = speech.seconds_since_last_played()
+        ago = f"{since:.1f}s after his last audio" if since != float("inf") \
+            else "with nothing of his played yet"
+        log.info(f"User ({verdict}, ignored, {ago}): {text}")
+        return
+    log.info(f"User: {text}")
+    if await _bridge_take_utterance(text):
+        return
+    if _is_fresh_start(text):
+        _spawn(_start_fresh())
+        return
+    _spawn(_handle_utterance(text))
+
+
 @app.websocket("/ws/voice")
 async def voice_handler(ws: WebSocket):
     """
@@ -6883,7 +6924,13 @@ async def voice_handler(ws: WebSocket):
         # Through this client's own queue, not straight down the socket, so
         # the opening frames cannot be overtaken by a broadcast that lands
         # while they are in flight.
-        _enqueue(queue, {"type": "config", "muteMicDuringSpeech": MUTE_MIC_DURING_SPEECH})
+        config = {"type": "config", "muteMicDuringSpeech": MUTE_MIC_DURING_SPEECH}
+        if stt_local.mode() == "local":
+            # Only said when it is true: the default frame is byte-for-byte
+            # what it always was, and a page that never heard of `stt` reads
+            # a missing key as the browser's own recogniser.
+            config["stt"] = "local"
+        _enqueue(queue, config)
         _enqueue(queue, {"type": "status", "state": "idle"})
 
         global _last_greeting_time
@@ -6941,42 +6988,105 @@ async def voice_handler(ws: WebSocket):
                 except (KeyError, TypeError, ValueError, OverflowError):
                     pass
             elif kind == "transcript" and msg.get("isFinal"):
-                text = apply_speech_corrections(str(msg.get("text", "")).strip())
-                if not text:
-                    continue
-                verdict = await speech.user_final(text)
-                if verdict == "replay":
-                    # "Say that again": resend what was already synthesized —
-                    # no brain turn, so no cost and no risk of coming back
-                    # with different words. Never routed to _handle_utterance.
-                    log.info(f"User (replay): {text}")
-                    if not await speech.replay_last():
-                        await speech.say(NOTHING_TO_REPLAY_LINE, Priority.NORMAL)
-                    continue
-                if verdict != "speech":
-                    # Say WHY, so a dropped sentence can be diagnosed from the
-                    # log alone. Live, "User (echo, ignored): now" was the first
-                    # word of the user's reply being eaten, and it took a
-                    # transcript read-through to see that -- the age of the
-                    # last played chunk is the fact that decides it.
-                    since = speech.seconds_since_last_played()
-                    ago = f"{since:.1f}s after his last audio" if since != float("inf") \
-                        else "with nothing of his played yet"
-                    log.info(f"User ({verdict}, ignored, {ago}): {text}")
-                    continue
-                log.info(f"User: {text}")
-                if await _bridge_take_utterance(text):
-                    continue
-                if _is_fresh_start(text):
-                    _spawn(_start_fresh())
-                    continue
-                _spawn(_handle_utterance(text))
+                await _handle_final_transcript(str(msg.get("text", "")))
     except WebSocketDisconnect:
         log.info("Voice WebSocket disconnected")
     except Exception as e:
         log.error(f"WebSocket error: {e}", exc_info=True)
     finally:
         _drop_voice_client(ws)
+
+
+# -- WebSocket local microphone (JARVIS_STT=local) --------------------------
+
+_mic_ws: Optional[WebSocket] = None
+
+
+@app.websocket("/ws/mic")
+async def mic_handler(ws: WebSocket):
+    """
+    The local recogniser's audio path. Behind the same Origin/Host gate as
+    every other socket (`web_auth.OriginGuard` covers every route).
+
+    Client -> Server:
+        binary frames: PCM16 little-endian, 16 kHz, mono, any length
+        {"type": "pause"}     the page stopped listening; drop a half-heard phrase
+
+    Server -> Client:
+        {"type": "ready", "sampleRate": 16000, "wakeWord": false, "model": "base"}
+        {"type": "state", "state": "listening"|"wake"|"recording"|"transcribing"}
+        {"type": "transcript", "text": "..."}   what was heard, for the page's own meter
+        {"type": "error", "text": "..."}
+
+    The text is not answered here: it goes through `_handle_final_transcript`,
+    the function a browser final result goes through, and JARVIS's reply
+    travels on `/ws/voice` as always.
+    """
+    global _mic_ws
+    await ws.accept()
+    if stt_local.mode() != "local":
+        await ws.send_json({"type": "error", "text": "Local speech recognition is not enabled."})
+        await ws.close(code=1008)
+        return
+
+    async def emit(frame: dict) -> None:
+        await ws.send_json(frame)
+
+    async def heard(text: str) -> None:
+        await ws.send_json({"type": "transcript", "text": text})
+        if speech is not None:
+            await _handle_final_transcript(text)
+
+    try:
+        session = stt_local.MicSession(emit=emit, on_text=heard)
+    except Exception as e:
+        log.error("stt: could not start the local recogniser: %s", e)
+        await ws.send_json({"type": "error",
+                            "text": "Local speech recognition could not start; see the server log."})
+        await ws.close(code=1011)
+        return
+    # One microphone at a time: a reloaded page replaces the old connection
+    # rather than leaving two feeding the same recogniser.
+    previous, _mic_ws = _mic_ws, ws
+    if previous is not None:
+        try:
+            await previous.close(code=1000)
+        except Exception:
+            pass
+    log.info("Mic WebSocket connected (wake word: %s)", session.wake_word)
+    try:
+        await ws.send_json(stt_local.ready_frame())
+        while True:
+            message = await ws.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+            data = message.get("bytes")
+            if data is not None:
+                # Same policy as the browser path: with the mute option on,
+                # nothing is heard while he speaks. Without it the echo
+                # rejection in `speech.user_final` decides, as it does there.
+                if MUTE_MIC_DURING_SPEECH and speech is not None and speech.is_speaking():
+                    session.reset()
+                    continue
+                await session.feed(data)
+                continue
+            text = message.get("text")
+            if text:
+                try:
+                    msg = json.loads(text)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(msg, dict) and msg.get("type") == "pause":
+                    session.reset()
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        log.error(f"Mic WebSocket error: {e}", exc_info=True)
+    finally:
+        session.close()
+        if _mic_ws is ws:
+            _mic_ws = None
+        log.info("Mic WebSocket disconnected")
 
 
 # ---------------------------------------------------------------------------
