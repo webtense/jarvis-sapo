@@ -5,7 +5,7 @@
 #   jarvis-claude [argumentos de claude]
 set -euo pipefail
 
-command -v tmux >/dev/null || { echo "Falta tmux: sudo apt install tmux" >&2; exit 1; }
+command -v tmux >/dev/null || { echo "ERROR: falta tmux (instálalo con: sudo apt install tmux)." >&2; exit 1; }
 
 if [[ -n "${TMUX:-}" ]]; then
   exec claude "$@"

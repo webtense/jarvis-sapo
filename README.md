@@ -1,3 +1,5 @@
+> [Versión en castellano](README.es.md)
+
 > **jarvis-ubuntu** es un fork de [ethanplusai/jarvis](https://github.com/ethanplusai/jarvis) (© 2026 Ethan Rogers) para Ubuntu/Linux.
 > Mantiene la licencia original: uso personal, educativo y **no comercial**; el uso comercial requiere licencia del autor.
 > Estado: en desarrollo (ver [CHANGELOG](CHANGELOG.md)). Ubuntu: `scripts/install-ubuntu.sh` y después `scripts/start-ubuntu.sh`. Para que JARVIS pueda contestar permisos en otras sesiones, lanza `claude` con `scripts/jarvis-claude` (usa tmux; Wayland no permite pulsar teclas en otras ventanas).

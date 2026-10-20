@@ -7,8 +7,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 trap 'kill 0' EXIT
 
-# JARVIS_LANGUAGE (en|es) from the environment or .env decides what the browser
-# listens for. Read the one line; never source .env (it holds secrets).
+# JARVIS_LANGUAGE (en|es), del entorno o de .env, decide qué idioma escucha el
+# navegador. Se lee solo esa línea; nunca se hace `source` de .env (tiene secretos).
 LANGUAGE="${JARVIS_LANGUAGE:-$(sed -n 's/^JARVIS_LANGUAGE=//p' .env 2>/dev/null | tail -1 | tr -d '"'"'"' ')}"
 case "${LANGUAGE:-en}" in
   es*) export VITE_JARVIS_LANG=es-ES ;;
