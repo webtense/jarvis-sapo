@@ -16,8 +16,10 @@ no toca).
 
 **JARVIS nunca ejecuta acciones sobre la casa ni sobre BTR desde aquí.** No
 enciende luces, no arma ni desarma la alarma, no toca calderas, no crea
-reservas. Solo consulta. Está garantizado en el código, no en la educación del
-modelo (ver "Qué puede y qué no").
+reservas. Solo consulta. Esa garantía es de **este servidor MCP**: está en su
+código, no en la educación del modelo (ver "Qué puede y qué no"). No cubre a un
+proceso del mismo usuario con Bash que tenga el token: por eso el token no se
+reparte (ver "Dónde guardar las credenciales").
 
 ## Qué puede y qué no
 
@@ -32,9 +34,14 @@ Home Assistant (herramientas `ha_*`):
 
 La garantía: la única función de red (`_get`) construye siempre la petición con
 método GET y rechaza, antes de abrir ningún socket, cualquier ruta que no esté
-en una lista corta. Un test lo demuestra. Aun así, **crea el token con un
-usuario de Home Assistant de permisos mínimos** si puedes: es una segunda
-barrera independiente del código.
+en una lista corta, y no sigue redirecciones (una respuesta 3xx es un error; si
+las siguiera, reenviaría el token a otro servidor). Un test lo demuestra.
+
+Esto **no es una barrera de lectura frente a quien tenga el token**: Home
+Assistant no tiene tokens de solo lectura, y un usuario no administrador también
+puede llamar a servicios. Crear el token con un usuario no administrador reduce
+el daño (es una mitigación parcial), pero no impide escribir. Lo que protege es
+que el token solo lo vea este servidor MCP.
 
 Lo que devuelve Home Assistant (nombres, mensajes) es texto de terceros: se
 limpia de caracteres de control, se trunca y se entrega marcado como dato, y la
@@ -48,30 +55,47 @@ quita nada ahí.
 
 Nunca en el repositorio, ni en `connections.json`, ni en `.env` versionado.
 
-- **Infisical** (recomendado): guarda `HA_URL` y `HA_TOKEN` (y
-  `BTR_ACI_BASIC_AUTH`) como secretos y arranca JARVIS con ellos cargados en el
-  entorno (en este equipo, el flujo habitual de `/btr-infiscal`).
-- **Variable de entorno**: en el servicio, un fichero `EnvironmentFile` fuera
-  del repo con permisos `600`, o `export` en la sesión que arranca JARVIS.
+- **Home Assistant**: el token va en un **fichero con permisos `600`, fuera del
+  repo y de `data/`** (por ejemplo `~/.config/jarvis/ha_token`), y el servidor
+  lo lee con `HA_TOKEN_FILE`. Indícalo en el bloque `env` de la entrada `casa`
+  de `connections.json`, junto con `HA_URL` (la dirección no es secreta). El
+  servidor rechaza un fichero legible por grupo u otros. **No exportes
+  `HA_TOKEN` en el entorno de JARVIS.** Si usas Infisical, que genere ese
+  fichero en el arranque en vez de cargar la variable.
+- **BTR/ACI**: `BTR_ACI_BASIC_AUTH` solo puede llegar a Claude Code por el
+  entorno del cerebro (la expansión de `${...}` en `headers`); es el caso menos
+  bueno, prefiere un puente stdio que lea un fichero `600`.
 
-Los servidores MCP que JARVIS lanza heredan el entorno de JARVIS; si tu
-`connections.json` usa un bloque `env`, no pongas ahí el valor real, deja que
-lo herede.
+Qué protege el código y qué no:
 
-> Comprueba qué entorno pasa realmente JARVIS a sus hijos: el cerebro limpia
-> las variables `ANTHROPIC_*` y puede filtrar otras. Si tras activar la conexión
-> la herramienta dice "Home Assistant is not configured", la variable no ha
-> llegado al hijo; ese mensaje indica falta de configuración, no un fallo de red.
+- Los **runs sin supervisión** (`run_executor.py`) se lanzan con
+  `--dangerously-skip-permissions` y tienen Bash. Por eso se les quitan
+  `HA_URL`, `HA_TOKEN`, `HA_TOKEN_FILE` y `BTR_ACI_BASIC_AUTH`
+  (`claude_env.run_env()`); un run desviado por un texto malicioso no hereda el
+  token por el entorno.
+- El cerebro **sí** hereda el entorno de JARVIS (así configura los servidores
+  MCP que lanza), por eso la recomendación es el fichero: el token no está en
+  ningún entorno.
+- Un fichero `600` lo puede leer cualquier proceso de tu usuario, incluido un
+  run con Bash que sepa la ruta. El fichero evita el reparto accidental por
+  entorno; no es un aislamiento. Si eso te importa, ejecuta JARVIS con otro
+  usuario del sistema o no actives la conexión.
+
+> Si tras activar la conexión la herramienta dice "Home Assistant is not
+> configured", la variable no ha llegado al hijo (revisa el bloque `env`); ese
+> mensaje indica falta de configuración, no un fallo de red.
 
 ## Activar la casa
 
 1. En Home Assistant: perfil de usuario, "Tokens de acceso de larga duración",
-   crear uno. Cópialo directamente a Infisical; no lo pegues en ningún chat ni fichero.
+   crear uno. Guárdalo directamente en el fichero `600` (por ejemplo con
+   `umask 077`); no lo pegues en ningún chat. Mejor, un usuario no administrador.
 2. Abre `jarvis_home/connections.examples/ha-readonly.json`, copia la entrada
    `casa` dentro de `mcpServers` en `data/jarvis/connections.json` y pon la ruta
    absoluta a `ha_readonly_mcp.py`.
-3. Arranca JARVIS con `HA_URL` (por ejemplo `http://<tu-HA>:8123`) y `HA_TOKEN`
-   en el entorno.
+3. En el bloque `env` de esa entrada pon `HA_URL` (por ejemplo
+   `http://<tu-HA>:8123`; si es `http://` sin TLS, el token viaja en claro por
+   tu red, prefiere `https://`) y `HA_TOKEN_FILE` con la ruta del fichero.
 4. Reinicia el servidor y pregúntale "¿a qué estás conectado?". Si algo no
    arrancó, lo nombra.
 
@@ -83,7 +107,7 @@ son cuatro, alrededor de 1.000.
 1. Abre `jarvis_home/connections.examples/btr-aci-readonly.json`.
 2. Sustituye `<URL_DEL_MCP_BTR_ACI>` por la URL real y calcula la cabecera
    `Basic base64(usuario:clave)` fuera del repo; guárdala en la variable
-   `BTR_ACI_BASIC_AUTH`.
+   `BTR_ACI_BASIC_AUTH` (ver los límites arriba).
 3. Copia la entrada `btr` a `data/jarvis/connections.json`.
 
 No se ha podido comprobar que la versión de Claude Code que usa JARVIS expanda

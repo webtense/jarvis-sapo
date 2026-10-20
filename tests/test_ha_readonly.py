@@ -3,11 +3,14 @@
 The network is faked at `ha_readonly_mcp._open`; no Home Assistant, no
 network, no credentials.
 """
+import email
 import io
 import json
 import re
 import sys
 import urllib.error
+import urllib.request
+import urllib.response
 from pathlib import Path
 
 import pytest
@@ -283,3 +286,109 @@ def test_the_ha_example_points_at_a_script_that_exists():
     entry = body["mcpServers"]["casa"]
     assert Path(entry["args"][0]).name == "ha_readonly_mcp.py"
     assert (REPO / "ha_readonly_mcp.py").is_file()
+
+
+# --- redirects never carry the token elsewhere --------------------------------
+
+class _FakeHTTP(urllib.request.HTTPHandler):
+    """Answers every request with a 302 to another host and records what it saw."""
+
+    def __init__(self):
+        super().__init__()
+        self.seen = []
+
+    def http_open(self, req):
+        self.seen.append((req.full_url, req.get_header("Authorization")))
+        resp = urllib.response.addinfourl(
+            io.BytesIO(b""), email.message_from_string("Location: http://other.invalid/api/services/x\n"),
+            req.full_url, 302)
+        resp.msg = "Found"
+        return resp
+
+
+def test_a_redirect_is_not_followed_and_the_token_goes_nowhere_else(monkeypatch):
+    monkeypatch.setenv("HA_URL", "http://ha.invalid:8123")
+    monkeypatch.setenv("HA_TOKEN", SECRET)
+    fake = _FakeHTTP()
+    # the real redirect policy, over a fake transport
+    monkeypatch.setattr(ha, "_OPENER", urllib.request.build_opener(ha._NoRedirect, fake))
+    err, text = _call("ha_home_summary")
+    assert err and "redirect" in text
+    assert len(fake.seen) == 1 and fake.seen[0][0].startswith("http://ha.invalid:8123/api/states")
+    assert SECRET not in text and "other.invalid" not in text
+
+
+def test_the_redirect_handler_refuses_every_redirect():
+    req = urllib.request.Request("http://ha.invalid:8123/api/states")
+    assert ha._NoRedirect().redirect_request(
+        req, None, 302, "Found", {}, "http://other.invalid/api/services/x") is None
+
+
+def test_a_3xx_from_the_seam_is_an_error_and_makes_no_second_request(net):
+    net.routes["/api/states"] = urllib.error.HTTPError(
+        "http://ha.invalid:8123/api/states", 302, "Found", {}, None)
+    err, text = _call("ha_home_summary")
+    assert err and "redirect" in text and len(net.calls) == 1
+
+
+# --- the token file ------------------------------------------------------------
+
+def _token_file(tmp_path, mode=0o600, text=SECRET + "\n"):
+    p = tmp_path / "ha_token"
+    p.write_text(text)
+    p.chmod(mode)
+    return p
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_the_token_can_come_from_a_600_file(net, monkeypatch, tmp_path):
+    monkeypatch.delenv("HA_TOKEN", raising=False)
+    monkeypatch.setenv("HA_TOKEN_FILE", str(_token_file(tmp_path)))
+    err, _ = _call("ha_home_summary")
+    assert not err
+    assert net.calls[0].get_header("Authorization") == f"Bearer {SECRET}"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_a_token_file_readable_by_others_is_refused(net, monkeypatch, tmp_path):
+    monkeypatch.setenv("HA_TOKEN_FILE", str(_token_file(tmp_path, 0o644)))
+    err, text = _call("ha_home_summary")
+    assert err and "chmod 600" in text and net.calls == []
+    assert SECRET not in text and str(tmp_path) not in text
+
+
+def test_a_missing_or_empty_token_file_is_not_configured(net, monkeypatch, tmp_path):
+    monkeypatch.delenv("HA_TOKEN", raising=False)
+    monkeypatch.setenv("HA_TOKEN_FILE", str(tmp_path / "nope"))
+    err, text = _call("ha_home_summary")
+    assert err and "cannot be read" in text and str(tmp_path) not in text
+    monkeypatch.setenv("HA_TOKEN_FILE", str(_token_file(tmp_path, 0o600, "\n")))
+    err, text = _call("ha_home_summary")
+    assert err and "not configured" in text
+    assert net.calls == []
+
+
+# --- unattended runs do not inherit the connection credentials ----------------
+
+def test_run_env_drops_connection_credentials_but_the_brain_env_keeps_them(monkeypatch):
+    import claude_env
+    for k in ("HA_URL", "HA_TOKEN", "HA_TOKEN_FILE", "BTR_ACI_BASIC_AUTH"):
+        monkeypatch.setenv(k, "x")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    monkeypatch.setenv("JARVIS_MARKER", "kept")
+    run = claude_env.run_env()
+    assert not set(claude_env.RUN_SCRUBBED_ENV_KEYS) & set(run)
+    assert "ANTHROPIC_API_KEY" not in run and run["JARVIS_MARKER"] == "kept"
+    # the brain launches the MCP servers and is what configures them
+    assert "HA_URL" in claude_env.child_env()
+
+
+def test_the_run_executor_spawns_with_run_env():
+    assert "claude_env.run_env()" in (REPO / "run_executor.py").read_text("utf-8")
+
+
+def test_the_ha_example_uses_a_token_file_not_a_token():
+    body = json.loads((REPO / "jarvis_home/connections.examples/ha-readonly.json").read_text("utf-8"))
+    env = body["mcpServers"]["casa"]["env"]
+    assert "HA_TOKEN" not in env and env["HA_TOKEN_FILE"].startswith("/")
+    assert env["HA_URL"].startswith("<")
