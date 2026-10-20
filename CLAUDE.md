@@ -214,3 +214,18 @@ needs the network, a real window, or a real `claude`, mark it.
 - SQLite for runs, run events and usage (`run_store.py`, `usage_store.py`);
   long-term memory is plain Markdown files instead (`jarvis_memory.py`) —
   the user edits it directly, so it is never a database
+
+---
+
+# jarvis-ubuntu (este fork)
+
+Fork de ethanplusai/jarvis para Ubuntu/Linux. Todo lo de arriba sigue valiendo; esto es lo que cambia.
+
+- **Plataforma**: `host.py` (`is_linux()`, `is_wayland()`). Cada módulo que antes era solo macOS (`actions`, `screen`, `dialog`, `notifier`, `preflight`) conserva intacto su camino macOS y añade una rama Linux. Los tests fijan `host.is_linux` a False por defecto (`tests/conftest.py`); los de Linux usan la fixture `as_linux`.
+- **Voz**: `tts.py` tiene dos proveedores, Fish y Piper (local, `requirements-linux.txt`). `provider()` elige solo. Voces en `data/voices/` (ignorado por git).
+- **Idioma**: `lang.py`, `JARVIS_LANGUAGE=en|es`. Persona en `jarvis_home/CLAUDE.es.md`; si cambias `CLAUDE.md` en inglés, revisa también la versión es.
+- **Permisos en otras sesiones**: vía tmux (`dialog.py`), solo si la sesión corre con `scripts/jarvis-claude`.
+- **Scripts**: `install-ubuntu.sh`, `start-ubuntu.sh` (puerto fijo 5173), `install-service.sh` + `jarvis.service` (servicio de sistema).
+- **Flujo de trabajo** (/btr-baseprogramacion): rama corta → PR → CI en verde (macOS + Ubuntu + gitleaks) → squash. Versionado `ubuntu-X.Y.Z` en CHANGELOG.md. Los tests solo se ejecutan en CI.
+- **Licencia**: la original, uso no comercial con atribución a Ethan Rogers. Pendiente: confirmar con el autor la redistribución del fork.
+- **Secretos**: nada en el repo. `.env`, certificados, `.venv` y `data/` son locales a cada equipo.
