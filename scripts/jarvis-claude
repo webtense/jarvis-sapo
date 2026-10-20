@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Lanza `claude` dentro de tmux para que JARVIS pueda ver el terminal de la
+# sesión y contestarle las peticiones de permiso (Wayland no deja inyectar
+# teclas en otras ventanas; tmux sí es direccionable por tty).
+#   jarvis-claude [argumentos de claude]
+set -euo pipefail
+
+command -v tmux >/dev/null || { echo "Falta tmux: sudo apt install tmux" >&2; exit 1; }
+
+if [[ -n "${TMUX:-}" ]]; then
+  exec claude "$@"
+fi
+exec tmux new-session -s "claude-$$" -- claude "$@"

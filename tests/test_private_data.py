@@ -27,6 +27,7 @@ import importlib
 import json
 import os
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -368,6 +369,14 @@ def test_a_symlink_whose_target_is_miscased_is_refused(wired):
             repo_read.resolve_within(project, link.name)
 
 
+needs_case_insensitive_fs = pytest.mark.skipif(
+    sys.platform.startswith("linux"),
+    reason="miscased spellings only alias the same directory on a "
+           "case-insensitive filesystem (macOS default); on Linux they are "
+           "different directories, so the premise does not exist")
+
+
+@needs_case_insensitive_fs
 def test_the_walk_never_descends_a_miscased_private_root(wired):
     """A grep does not name a file, so the named-path refusal never runs.
     `walk._is_private` carried the identical string comparison, so a project
@@ -385,6 +394,7 @@ def test_the_walk_never_descends_a_miscased_private_root(wired):
         assert any(rel == "server.py" for rel, _ in found.files), root
 
 
+@needs_case_insensitive_fs
 @pytest.mark.asyncio
 async def test_search_refuses_every_spelling_of_the_root(wired, monkeypatch):
     import repo_read

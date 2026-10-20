@@ -5,6 +5,23 @@ import pytest_asyncio
 
 
 @pytest.fixture(autouse=True)
+def _pin_host_to_macos(monkeypatch, request):
+    """The upstream suite was written against a Mac and fakes `osascript`,
+    `screencapture` and `sips` at the subprocess seam. Pin `host.is_linux`
+    False so those tests keep exercising the macOS branch on any runner.
+    Linux-branch tests (tests/linux/) opt in with the `as_linux` fixture.
+    """
+    import host
+    monkeypatch.setattr(host, "is_linux", lambda: False)
+
+
+@pytest.fixture
+def as_linux(monkeypatch):
+    import host
+    monkeypatch.setattr(host, "is_linux", lambda: True)
+
+
+@pytest.fixture(autouse=True)
 def _never_spawn_a_real_brain(monkeypatch):
     """server.lifespan builds the brain but must not start `claude` under test."""
     monkeypatch.setenv("JARVIS_BRAIN_AUTOSTART", "0")

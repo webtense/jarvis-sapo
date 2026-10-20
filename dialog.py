@@ -39,6 +39,8 @@ import re
 import shutil
 from dataclasses import dataclass
 
+import host
+
 log = logging.getLogger("jarvis.dialog")
 
 # --- outcomes ---------------------------------------------------------------
@@ -138,7 +140,7 @@ def normalize_tty(tty: str | None) -> str | None:
         t = "/dev/" + t
     # A device path and nothing else. Anything stranger is not a tty we will
     # act on, and refusing here keeps unvetted text out of the AppleScript.
-    return t if re.fullmatch(r"/dev/tty[a-zA-Z0-9]+", t) else None
+    return t if re.fullmatch(r"/dev/(tty[a-zA-Z0-9]+|pts/[0-9]+)", t) else None
 
 
 def tty_for_pid(pid) -> str | None:
@@ -346,6 +348,70 @@ return "ok"
 '''
 
 
+# --- Linux: tmux ---------------------------------------------------------------
+#
+# Wayland gives a client no way to press a key in another application's window,
+# and TIOCSTI is off by default in current kernels. What a session CAN be
+# reached through is tmux: every pane publishes its tty, so the same
+# pid -> tty -> pane identity as the Terminal.app path holds, with the same
+# rule — no pane owns the tty, press nothing. A session running in a plain
+# gnome-terminal or VS Code tab is `not_found`, which is the honest answer.
+# `jarvis-claude` (scripts/) starts `claude` inside tmux for exactly this.
+
+TMUX_TIMEOUT = 5.0
+_TMUX_KEYS = {"return": "Enter", "escape": "Escape"}
+
+
+async def _tmux(*args: str, timeout: float = TMUX_TIMEOUT) -> tuple[int, str, str]:
+    proc = await asyncio.create_subprocess_exec(
+        "tmux", *args,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+            await proc.wait()
+        except Exception:
+            pass
+        return -1, "", "timeout"
+    return (proc.returncode or 0, stdout.decode("utf-8", "replace"),
+            stderr.decode("utf-8", "replace"))
+
+
+async def find_tmux_pane(tty: str | None) -> str | None:
+    """The tmux pane id (`%3`) whose tty is EXACTLY `tty`, or None."""
+    want = normalize_tty(tty)
+    if want is None or shutil.which("tmux") is None:
+        return None
+    code, stdout, stderr = await _tmux("list-panes", "-a", "-F",
+                                       "#{pane_tty} #{pane_id}")
+    if code != 0:
+        # "no server running" is the normal answer when tmux is not in use.
+        return None
+    for line in stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and normalize_tty(parts[0]) == want \
+                and re.fullmatch(r"%[0-9]+", parts[1]):
+            return parts[1]
+    return None
+
+
+async def _answer_linux(pid: int, normalized: str) -> str:
+    tty = await tty_for_pid_async(pid)
+    if tty is None:
+        return NO_TTY
+    pane = await find_tmux_pane(tty)
+    if pane is None:
+        return NOT_FOUND
+    key = _TMUX_KEYS.get(normalized, normalized)
+    code, _stdout, stderr = await _tmux("send-keys", "-t", pane, key)
+    if code != 0:
+        log.warning(f"tmux send-keys failed ({code}): {stderr.strip()}")
+        return FAILED
+    return SENT
+
+
 async def answer(pid: int, key: str) -> str:
     """Press one key in the terminal that owns `pid`. Never raises.
 
@@ -361,6 +427,8 @@ async def answer(pid: int, key: str) -> str:
         log.warning(f"refusing a key outside the vocabulary: {key!r}")
         return BAD_KEY
     try:
+        if host.is_linux():
+            return await _answer_linux(pid, normalized)
         tty = await tty_for_pid_async(pid)
         if tty is None:
             return NO_TTY

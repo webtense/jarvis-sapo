@@ -24,9 +24,8 @@ jobs:
   pytest:
     name: pytest (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Ubuntu is the jarvis-ubuntu port. It is allowed to fail until the
-    # platform layer (F1) lands; macOS stays the upstream reference.
-    continue-on-error: ${{ matrix.os == 'ubuntu-latest' }}
+    # Ubuntu is the jarvis-ubuntu port; macOS stays the upstream reference.
+    # Both must be green.
     timeout-minutes: 25
     strategy:
       fail-fast: false
