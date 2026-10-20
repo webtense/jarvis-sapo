@@ -44,7 +44,19 @@ def brain_home() -> Path:
 
 
 def persona_template_path() -> Path:
-    """The CLAUDE.md this release ships."""
+    """The CLAUDE.md this release ships — the Spanish one when
+    `JARVIS_LANGUAGE=es` (`jarvis_home/CLAUDE.es.md`).
+
+    Switching language later swaps the brain's copy for the other template on
+    the next start, exactly as an upgrade would: `_sync_template` replaces a
+    file only when it still matches what JARVIS last wrote, so a persona the
+    user has edited is never overwritten.
+    """
+    import lang
+    if lang.language() == "es":
+        spanish = _TEMPLATE_DIR / "CLAUDE.es.md"
+        if spanish.is_file():
+            return spanish
     return _TEMPLATE_DIR / _PERSONA_NAME
 
 

@@ -1,0 +1,24 @@
+# Servicio de sistema para que JARVIS resida en un equipo. Se instala con
+# scripts/install-service.sh (necesita sudo una vez). Vive en /etc, no en el
+# home, para que un rsync --delete del perfil no pueda borrarlo.
+[Unit]
+Description=JARVIS (asistente de voz sobre Claude Code)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__DIR__
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:__HOME__/.local/bin
+ExecStart=__DIR__/scripts/start-ubuntu.sh
+Restart=on-failure
+RestartSec=10
+# /usr/bin va antes que ~/.local/bin a propósito: ahí puede haber un envoltorio de npm
+# (guardia anticompilación) que bloquea `npm run dev`; claude sí está en ~/.local/bin.
+# El servidor escucha solo en 127.0.0.1; nada de esto se expone a la red.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

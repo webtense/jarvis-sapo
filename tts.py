@@ -37,7 +37,6 @@ FISH_TTS_URL = "https://api.fish.audio/v1/tts"
 # `.env.example` ships a placeholder so the line exists; it is not a key.
 _FISH_PLACEHOLDERS = {"", "your-fish-audio-api-key-here"}
 
-DEFAULT_PIPER_VOICE = "es_ES-davefx-medium"
 
 
 @dataclass
@@ -99,7 +98,8 @@ def piper_model_path() -> Path:
     if explicit:
         return Path(explicit).expanduser()
     import data_paths
-    voice = os.environ.get("PIPER_VOICE", "").strip() or DEFAULT_PIPER_VOICE
+    import lang
+    voice = os.environ.get("PIPER_VOICE", "").strip() or lang.default_piper_voice()
     return data_paths.data_dir() / "voices" / f"{voice}.onnx"
 
 

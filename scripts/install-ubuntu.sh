@@ -17,7 +17,12 @@ python3 -m venv .venv
 .venv/bin/python -m playwright install chromium
 
 echo "==> Voz local (Piper, ~60 MB, sin clave ni red después de descargarla)"
-VOICE="${PIPER_VOICE:-es_ES-davefx-medium}"
+LANGUAGE="${JARVIS_LANGUAGE:-es}"
+case "$LANGUAGE" in
+  es*) DEFAULT_VOICE=es_ES-davefx-medium ;;
+  *)   DEFAULT_VOICE=en_GB-alan-medium ;;
+esac
+VOICE="${PIPER_VOICE:-$DEFAULT_VOICE}"
 [[ -f "data/voices/$VOICE.onnx" ]] || \
   .venv/bin/python -m piper.download_voices --download-dir data/voices "$VOICE"
 
@@ -32,6 +37,7 @@ if [[ ! -f cert.pem || ! -f key.pem ]]; then
 fi
 
 [[ -f .env ]] || cp .env.example .env
+grep -q '^JARVIS_LANGUAGE=' .env || printf '\n# Idioma de JARVIS: es | en\nJARVIS_LANGUAGE=%s\n' "$LANGUAGE" >> .env
 
 command -v claude >/dev/null || echo "AVISO: falta Claude Code (npm install -g @anthropic-ai/claude-code) y 'claude' para iniciar sesión."
 echo "Listo. Arranca con: scripts/start-ubuntu.sh"
