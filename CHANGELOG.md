@@ -3,6 +3,9 @@
 Fork de [ethanplusai/jarvis](https://github.com/ethanplusai/jarvis) (© 2026 Ethan Rogers) orientado a Ubuntu/Linux.
 Versionado semántico con prefijo `ubuntu-`. Uso personal y no comercial, igual que la licencia original.
 
+## ubuntu-0.4.1 — JARVIS residente
+- `scripts/install-service.sh` + `scripts/jarvis.service`: servicio de sistema (arranca con el equipo, se reinicia si cae). La unidad vive en /etc para que un rsync `--delete` del perfil no pueda borrarla.
+
 ## ubuntu-0.4.0 — F2b castellano (`JARVIS_LANGUAGE=es`)
 - `lang.py`: `JARVIS_LANGUAGE` (`en` por defecto, `es`) elige persona, voz Piper y locale del reconocimiento.
 - `jarvis_home/CLAUDE.es.md`: persona traducida (mismas reglas y herramientas); cambiar de idioma sustituye la copia del cerebro solo si el usuario no la ha editado.
