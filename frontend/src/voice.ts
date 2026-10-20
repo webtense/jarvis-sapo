@@ -1,16 +1,20 @@
 /**
- * Voice input (Web Speech API) and audio output (AudioContext) for JARVIS.
+ * Voice input (Web Speech API, or the local recogniser in localmic.ts) and
+ * audio output (AudioContext) for JARVIS.
  *
  * The microphone keeps listening while JARVIS speaks — the server decides what
  * is echo and what is a barge-in. Playback is a strictly ordered queue of
  * chunks; each one is acknowledged to the server when it finishes.
  */
 
+import { createLocalMic } from "./localmic";
+
 // ---------------------------------------------------------------------------
 // Voice Input
 // ---------------------------------------------------------------------------
 
-export interface VoiceInput {
+/** One recognition engine. */
+export interface EngineInput {
   start(): void;
   stop(): void;
   pause(): void;
@@ -19,6 +23,23 @@ export interface VoiceInput {
    *  provably deaf: capturing audio and returning nothing. */
   restart(reason: string): void;
 }
+
+export type SttMode = "browser" | "local";
+
+/** The engine the server asked for, behind the same methods. Exactly one
+ *  engine exists at a time: Chrome allows a single live SpeechRecognition and
+ *  two capture paths would both answer the same sentence. */
+export interface VoiceInput extends EngineInput {
+  /** Which engine to use — from the server's config frame (`stt`). Until it
+   *  is called, nothing listens; a server that never says gets the browser's
+   *  recogniser after a short wait. */
+  setMode(mode: SttMode): void;
+  mode(): SttMode | null;
+}
+
+// How long to wait for the server to say which engine, before assuming the
+// browser's (the behaviour of every server that predates `stt`).
+const MODE_WAIT_MS = 4000;
 
 const INTERIM_THROTTLE_MS = 200;
 const RETRY_MAX_MS = 30000;
@@ -146,8 +167,61 @@ export function createVoiceInput(
   onTranscript: (text: string) => void,
   onInterim: (text: string) => void,
   onError: (msg: string) => void,
-  onMicEvent: (event: string) => void = () => {}
+  onMicEvent: (event: string) => void = () => {},
+  onHeard: (text: string) => void = () => {}
 ): VoiceInput {
+  let current: EngineInput | null = null;
+  let currentMode: SttMode | null = null;
+  let wantListen = false;
+  let wantPaused = false;
+
+  function build(mode: SttMode): EngineInput {
+    if (mode === "local") {
+      const mic = createLocalMic({
+        // The server has already acted on this text; it only proves the
+        // microphone is being heard.
+        onHeard,
+        onState: (state) => console.info(`[voice] local mic: ${state}`),
+        onError,
+        onEvent: onMicEvent,
+      });
+      // Nothing to rebuild: capture and socket restore themselves.
+      return { ...mic, restart(reason: string) { onMicEvent(`local mic: restart ignored (${reason})`); } };
+    }
+    return createBrowserVoiceInput(onTranscript, onInterim, onError, onMicEvent);
+  }
+
+  function setMode(mode: SttMode) {
+    if (mode === currentMode) return;
+    // The old engine is stopped before the new one exists.
+    current?.stop();
+    currentMode = mode;
+    current = build(mode);
+    if (wantListen) {
+      current.start();
+      if (wantPaused) current.pause();
+    }
+  }
+
+  setTimeout(() => { if (currentMode === null) setMode("browser"); }, MODE_WAIT_MS);
+
+  return {
+    start() { wantListen = true; wantPaused = false; current?.start(); },
+    stop() { wantListen = false; wantPaused = false; current?.stop(); },
+    pause() { wantPaused = true; current?.pause(); },
+    resume() { wantPaused = false; current?.resume(); },
+    restart(reason: string) { current?.restart(reason); },
+    setMode,
+    mode() { return currentMode; },
+  };
+}
+
+function createBrowserVoiceInput(
+  onTranscript: (text: string) => void,
+  onInterim: (text: string) => void,
+  onError: (msg: string) => void,
+  onMicEvent: (event: string) => void
+): EngineInput {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const SR = (window as any).SpeechRecognition || (typeof webkitSpeechRecognition !== "undefined" ? webkitSpeechRecognition : null);
   if (!SR) {

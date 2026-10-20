@@ -524,7 +524,7 @@ async def test_run_checks_runs_all_registered_checks(monkeypatch):
     assert names == {
         "claude_cli", "claude_login", "accessibility", "screen_recording",
         "fish_api_key", "anthropic_key_leftover", "cross_session_inbound",
-        "linux_tools",
+        "linux_tools", "local_stt",
     }
 
 

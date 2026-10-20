@@ -511,6 +511,30 @@ def _check_linux_tools_sync() -> Check:
     )
 
 
+def _check_local_stt_sync() -> Check:
+    """Local speech recognition (JARVIS_STT=local): say what is missing.
+
+    Never a failure: with `faster-whisper` absent the page keeps the browser's
+    recogniser, so the worst case is the behaviour JARVIS had before.
+    """
+    import stt_local
+    if stt_local.requested_mode() != "local":
+        return Check(name="local_stt", status=STATUS_OK,
+                     message="Speech recognition: the browser's (JARVIS_STT=browser).")
+    gaps = stt_local.problems()
+    if not gaps:
+        wake = " with the wake word" if stt_local.wake_enabled() else ""
+        return Check(name="local_stt", status=STATUS_OK,
+                     message=f"Local speech recognition ready ({stt_local.model_name()}{wake}).")
+    using = ("the browser's recogniser is in use instead"
+             if stt_local.mode() == "browser" else "it will download on first use")
+    return Check(
+        name="local_stt", status=STATUS_WARN,
+        message="JARVIS_STT=local is set but " + "; ".join(gaps) + f" ({using}).",
+        remedy="JARVIS_INSTALL_STT=1 scripts/install-ubuntu.sh",
+    )
+
+
 def _check_anthropic_key_leftover_sync() -> Check:
     """A leftover ANTHROPIC_* var signals a misconfigured .env.
 
@@ -689,7 +713,7 @@ def enable_cross_session_inbound() -> tuple[bool, str]:
 _ASYNC_CHECKS = (_check_claude_cli, _check_claude_login, _check_accessibility)
 _SYNC_CHECKS = (_check_fish_api_key_sync, _check_anthropic_key_leftover_sync,
                 _check_cross_session_inbound_sync, _check_screen_recording_sync,
-                _check_linux_tools_sync)
+                _check_linux_tools_sync, _check_local_stt_sync)
 
 
 async def _run_one(fn, *, is_async: bool, timeout: float) -> Check:
@@ -756,6 +780,8 @@ def _phrase_for(check: Check) -> str:
         return "Screen Recording couldn't be checked"
     if name == "linux_tools":
         return "some Linux helper tools are missing"
+    if name == "local_stt":
+        return "local speech recognition isn't fully installed"
     if name == "fish_api_key":
         return "I have no Fish Audio key"
     if name == "anthropic_key_leftover":
