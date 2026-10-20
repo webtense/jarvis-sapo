@@ -116,9 +116,14 @@ export function createLocalMic(h: LocalMicHandlers): LocalMic {
       else if (type === "state") h.onState(String(msg.state ?? ""));
       else if (type === "error") h.onError(String(msg.text ?? "Local speech recognition error"));
     };
-    sock.onclose = () => {
+    sock.onclose = (ev) => {
       if (ws === sock) ws = null;
       if (!wanted) return;
+      // 4001: another page took the microphone. Do not fight it for it.
+      if (ev.code === 4001) {
+        h.onEvent("local mic: another page took the microphone");
+        return;
+      }
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         connect();

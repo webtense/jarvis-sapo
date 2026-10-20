@@ -719,3 +719,18 @@ def test_garbage_text_frames_do_not_break_the_socket(client, monkeypatch):
         mic.send_json({"type": "nonsense"})
         mic.send_bytes(_phrase_audio())
         assert _drain(mic, lambda m: m["type"] == "transcript")
+
+
+def test_a_second_page_displaces_the_first_with_its_own_close_code(client, monkeypatch):
+    """Two tabs used to trade the microphone forever: the displaced page was
+    closed with a normal 1000, reconnected, and displaced the other in turn.
+    4001 is how the page knows to stay out of it."""
+    c, server = client
+    _local_server(monkeypatch)
+    with c.websocket_connect("/ws/mic") as first:
+        assert first.receive_json()["type"] == "ready"
+        with c.websocket_connect("/ws/mic") as second:
+            assert second.receive_json()["type"] == "ready"
+            with pytest.raises(WebSocketDisconnect) as gone:
+                first.receive_json()
+            assert gone.value.code == 4001
