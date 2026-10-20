@@ -65,20 +65,6 @@ def test_monitor_build_gone():
     assert not hasattr(actions, "open_claude_in_project")
 
 
-def test_work_session_gone():
-    import work_mode
-    importlib.reload(work_mode)
-    assert not hasattr(work_mode, "WorkSession")
-    assert not hasattr(work_mode, "SESSION_FILE")
-
-
-def test_is_casual_question_survives():
-    import work_mode
-    importlib.reload(work_mode)
-    assert work_mode.is_casual_question("what time is it") is True
-    assert work_mode.is_casual_question("build me a dashboard") is False
-
-
 def test_no_sentinel_string_remains():
     text = (ROOT / "actions.py").read_text()
     assert "JARVIS TASK COMPLETE" not in text
@@ -86,7 +72,7 @@ def test_no_sentinel_string_remains():
 
 
 def test_active_session_json_not_referenced():
-    for name in ("server.py", "work_mode.py"):
+    for name in ("server.py",):
         assert "active_session.json" not in (ROOT / name).read_text()
 
 

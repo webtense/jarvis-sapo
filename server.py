@@ -66,7 +66,6 @@ from pydantic import BaseModel
 
 import actions
 import builds
-from work_mode import is_casual_question
 import preflight
 import project_maker
 import projects_view
