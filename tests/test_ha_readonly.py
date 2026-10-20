@@ -113,7 +113,8 @@ def test_the_source_has_no_way_to_write():
     assert "/api/services" not in code
     assert not re.search(r"method\s*=\s*[\"'](?!GET)", code)
     assert not re.search(r"Request\([^)]*\bdata\b", code, re.S)
-    assert src.count("urlopen(") == 1
+    # the one network call goes through the no-redirect opener; bare urlopen follows redirects
+    assert src.count("_OPENER.open(") == 1 and "urlopen(" not in code
 
 
 def test_the_tools_advertise_no_write_capability():
