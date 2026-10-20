@@ -587,8 +587,9 @@ class RunExecutor:
                     # CLI silently prefers over the subscription login, moving
                     # every run onto paid API billing without a word. Same
                     # scrub the brain has had since milestone 1; see
-                    # claude_env.py.
-                    env=claude_env.child_env(),
+                    # claude_env.py. run_env() also drops the Home Assistant / BTR
+                    # connection credentials: a run has Bash and no permission prompt.
+                    env=claude_env.run_env(),
                     # asyncio's default 64 KiB StreamReader line limit is far
                     # smaller than a stream-json line can legitimately be
                     # (a big tool result, a long assistant message, a large

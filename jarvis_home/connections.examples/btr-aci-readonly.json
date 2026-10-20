@@ -1,0 +1,13 @@
+{
+  "//": "EJEMPLO NO ACTIVO. MCP remoto de SOLO LECTURA de BTR/ACI. Sustituye los marcadores <...> por tus valores. La autenticacion basica va por variable de entorno, nunca en claro. Copialo a data/jarvis/connections.json para activarlo. Ver docs/connections-casa-btr.md.",
+  "//auth": "Cabecera Authorization: Basic base64(<USUARIO_BTR>:<CLAVE>). Calculala fuera del repo y guardala en la variable BTR_ACI_BASIC_AUTH del entorno de JARVIS (valor completo, 'Basic xxxx'). Si tu version de Claude Code no expande variables en 'headers', usa un puente stdio (por ejemplo mcp-remote) que lea usuario y clave del entorno.",
+  "mcpServers": {
+    "btr": {
+      "type": "http",
+      "url": "<URL_DEL_MCP_BTR_ACI>",
+      "headers": {
+        "Authorization": "${BTR_ACI_BASIC_AUTH}"
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "//": "EJEMPLO NO ACTIVO. Para usarlo, copia la entrada de 'mcpServers' dentro de data/jarvis/connections.json (NO este fichero), cambia las rutas y la direccion. El token NO va aqui ni en el entorno de JARVIS: guardalo en un fichero con permisos 600 fuera del repo y de data/, y apunta HA_TOKEN_FILE a el. Ver docs/connections-casa-btr.md.",
+  "mcpServers": {
+    "casa": {
+      "command": "python3",
+      "args": ["/RUTA/ABSOLUTA/A/jarvis/ha_readonly_mcp.py"],
+      "env": {
+        "HA_URL": "<URL_DE_HOME_ASSISTANT>",
+        "HA_TOKEN_FILE": "/RUTA/ABSOLUTA/FUERA/DEL/REPO/ha_token"
+      }
+    }
+  }
+}

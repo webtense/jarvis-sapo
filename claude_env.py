@@ -27,6 +27,14 @@ import os
 SCRUBBED_ENV_PREFIXES = ("CLAUDE_CODE_", "ANTHROPIC_")
 SCRUBBED_ENV_KEYS = {"CLAUDECODE"}
 
+# Credentials of the user-declared read-only connections (docs/connections-casa-btr.md).
+# Unattended runs have Bash and --dangerously-skip-permissions, so a run steered
+# by prompt injection could use these directly (a POST to Home Assistant with
+# the token). Runs never need them. The brain's children DO inherit the
+# environment (that is how an MCP server it launches gets configured), so this
+# list applies to runs only, not to child_env().
+RUN_SCRUBBED_ENV_KEYS = {"HA_URL", "HA_TOKEN", "HA_TOKEN_FILE", "BTR_ACI_BASIC_AUTH"}
+
 # asyncio.create_subprocess_exec gives a child's stdout/stderr StreamReader a
 # 64 KiB *line* buffer by default (asyncio.streams._DEFAULT_LIMIT). `claude -p
 # --output-format stream-json` emits one JSON object per line, and a single
@@ -56,3 +64,8 @@ def child_env(base: dict[str, str] | None = None) -> dict[str, str]:
     return {k: v for k, v in source.items()
             if not k.startswith(SCRUBBED_ENV_PREFIXES)
             and k not in SCRUBBED_ENV_KEYS}
+
+
+def run_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """child_env() minus the connection credentials, for unattended runs."""
+    return {k: v for k, v in child_env(base).items() if k not in RUN_SCRUBBED_ENV_KEYS}
