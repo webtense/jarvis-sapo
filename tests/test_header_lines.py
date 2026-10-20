@@ -503,6 +503,22 @@ EXEMPT = {
         "never rendered into prose and never spoken"),
     "jarvis_mcp.main": (
         "the same JSON-RPC envelope id, echoed on the parse-error path"),
+    "ha_readonly_mcp._line": (
+        "the read-only Home Assistant connection is a separate stdio process, "
+        "not a session or a run. `state` here is a Home Assistant entity state, "
+        "and every Home Assistant string passes `_clean` (control characters "
+        "stripped, truncated) and is returned under UNTRUSTED_HEADER; "
+        "tests/test_ha_readonly.py drives it"),
+    "ha_readonly_mcp.get_history": (
+        "the same: a Home Assistant history row, cleaned by `_clean` and "
+        "returned under UNTRUSTED_HEADER"),
+    "ha_readonly_mcp.home_summary": (
+        "the same: Home Assistant entity states, cleaned and marked untrusted"),
+    "ha_readonly_mcp.handle": (
+        "`id` is the JSON-RPC message id off the stdio channel, echoed in the "
+        "response envelope, never rendered into prose"),
+    "ha_readonly_mcp.main": (
+        "the same JSON-RPC envelope id, echoed on the internal-error path"),
     "projects_view._pick_primary_path": (
         "`cwd` and `project_path` are compared and one is chosen; the "
         "function returns a PATH, and the Projects tab renders it through "
