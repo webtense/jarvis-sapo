@@ -7038,7 +7038,10 @@ async def mic_handler(ws: WebSocket):
             await _handle_final_transcript(text)
 
     try:
-        session = stt_local.MicSession(emit=emit, on_text=heard)
+        # Off the event loop: building the session loads the wake-word model
+        # (ONNX), and while it loads every websocket and the voice would stop.
+        session = await asyncio.to_thread(
+            stt_local.MicSession, emit=emit, on_text=heard)
     except Exception as e:
         log.error("stt: could not start the local recogniser: %s", e)
         await ws.send_json({"type": "error",
@@ -7046,11 +7049,14 @@ async def mic_handler(ws: WebSocket):
         await ws.close(code=1011)
         return
     # One microphone at a time: a reloaded page replaces the old connection
-    # rather than leaving two feeding the same recogniser.
+    # rather than leaving two feeding the same recogniser. The displaced page
+    # is told with its own close code (4001) so it does not reconnect and
+    # displace the new one in turn: two open tabs used to trade the
+    # microphone forever, reloading the model each time.
     previous, _mic_ws = _mic_ws, ws
     if previous is not None:
         try:
-            await previous.close(code=1000)
+            await previous.close(code=4001)
         except Exception:
             pass
     log.info("Mic WebSocket connected (wake word: %s)", session.wake_word)
