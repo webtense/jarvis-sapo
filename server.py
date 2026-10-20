@@ -461,7 +461,13 @@ _last_greeting_time: float = 0
 # ---------------------------------------------------------------------------
 
 async def synthesize_speech(text: str) -> Optional[bytes]:
-    """Generate speech audio from text using Fish Audio TTS."""
+    """Generate speech audio from text using the active TTS provider."""
+    if tts.provider() == "piper":
+        r = await tts.synthesize_local(text)
+        if r is not None:
+            _session_tokens["tts_calls"] += 1
+            _append_usage_entry(0, 0, "tts")
+        return r.audio if r else None
     if not FISH_API_KEY:
         log.warning("FISH_API_KEY not set, skipping TTS")
         return None
@@ -611,7 +617,12 @@ async def _voice_emit(msg: dict) -> None:
 
 
 async def _synth_for_speech(text: str) -> Optional[bytes]:
-    r = await tts.synthesize_chunk(text, api_key=FISH_API_KEY, voice_id=FISH_VOICE_ID, client=_tts_client)
+    if tts.provider() == "piper":
+        r = await tts.synthesize_local(text)
+    elif tts.provider() == "fish":
+        r = await tts.synthesize_chunk(text, api_key=FISH_API_KEY, voice_id=FISH_VOICE_ID, client=_tts_client)
+    else:
+        return None
     if r is None:
         return None
     _session_tokens["tts_calls"] += 1
@@ -1806,6 +1817,11 @@ async def lifespan(application: FastAPI):
 
     await start_brain_and_speech()
     await start_session_watcher()
+    if tts.provider() == "piper":
+        # Loading the voice is ~1.5 s; do it now rather than in the middle of
+        # the first sentence. Off the loop, and never fatal.
+        _background.add(warm := asyncio.create_task(asyncio.to_thread(tts.warm_up_local)))
+        warm.add_done_callback(_background.discard)
     # Deliberately not awaited: every check is time-boxed to 5s, so running
     # them inline could hold the server closed for that long before the UI can
     # connect -- and the mic is the first thing the user reaches for. The task
