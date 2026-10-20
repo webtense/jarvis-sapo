@@ -684,7 +684,7 @@ def test_nothing_is_transcribed_while_he_speaks_when_the_mute_option_is_on(clien
     texts = _record_finals(server, monkeypatch)
     monkeypatch.setattr(server, "MUTE_MIC_DURING_SPEECH", True)
     speaking = {"on": True}
-    monkeypatch.setattr(server.speech, "is_speaking", lambda: speaking["on"])
+    monkeypatch.setattr(type(server.speech), "is_speaking", property(lambda self: speaking["on"]))
     with c.websocket_connect("/ws/mic") as mic:
         mic.receive_json()
         mic.send_bytes(_phrase_audio())                  # dropped: he is talking

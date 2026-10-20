@@ -7065,7 +7065,7 @@ async def mic_handler(ws: WebSocket):
                 # Same policy as the browser path: with the mute option on,
                 # nothing is heard while he speaks. Without it the echo
                 # rejection in `speech.user_final` decides, as it does there.
-                if MUTE_MIC_DURING_SPEECH and speech is not None and speech.is_speaking():
+                if MUTE_MIC_DURING_SPEECH and speech is not None and speech.is_speaking:
                     session.reset()
                     continue
                 await session.feed(data)
