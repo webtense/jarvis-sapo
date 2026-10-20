@@ -16,7 +16,10 @@ case "${LANGUAGE:-en}" in
 esac
 
 .venv/bin/python server.py --host 127.0.0.1 &
-(cd frontend && npm run dev -- --strictPort --port 5173) &
+# Vite directamente, sin pasar por `npm run`: es lo mismo que hace el script
+# "dev" y no depende de qué `npm` haya primero en el PATH (un envoltorio puede
+# bloquear `npm run dev`).
+(cd frontend && ./node_modules/.bin/vite --strictPort --port 5173) &
 
 echo "JARVIS: http://localhost:5173  ·  panel: http://localhost:5173/dashboard.html"
 wait
