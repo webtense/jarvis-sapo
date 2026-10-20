@@ -3,6 +3,13 @@
 Fork de [ethanplusai/jarvis](https://github.com/ethanplusai/jarvis) (© 2026 Ethan Rogers) orientado a Ubuntu/Linux.
 Versionado semántico con prefijo `ubuntu-`. Uso personal y no comercial, igual que la licencia original.
 
+## ubuntu-0.3.0 — F2a voz local (Piper)
+- `tts.py` con dos proveedores: Fish Audio (original) y Piper local, sin clave ni red. Elección automática (`JARVIS_TTS_PROVIDER=auto|fish|piper|none`): Fish si hay clave real, si no Piper, si no solo texto.
+- Piper es dependencia opcional (`requirements-linux.txt`), cargada en diferido; la voz se precarga al arrancar (~1,5 s una vez, luego ~0,05–0,2 s por frase).
+- `speech.py` calcula la duración de audio WAV para el mismo suelo de ack que el MP3.
+- Preflight: el valor de relleno de `.env.example` ya no cuenta como clave; acepta la voz local.
+- El instalador descarga la voz `es_ES-davefx-medium` (cambiable con `PIPER_VOICE`).
+
 ## ubuntu-0.2.0 — F1 port Linux
 - `host.py`: selección de plataforma en tiempo de llamada; el camino macOS queda intacto.
 - Notificaciones con `notify-send`, terminal y navegador con gnome-terminal/Chrome/Firefox (URL validada, nunca opciones), editor con `xdg-open`.

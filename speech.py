@@ -6,9 +6,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import logging
 import re
 import time
+import wave
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Awaitable, Callable, Optional
@@ -191,8 +193,25 @@ def mp3_seconds(data: Optional[bytes]) -> float:
     return 0.0
 
 
+def wav_seconds(data: Optional[bytes]) -> float:
+    """How long this PCM WAV plays, from its header. 0.0 for anything that is
+    not one. (Piper emits WAV, so the local voice gets the same ack floor.)"""
+    if not data or len(data) < 44 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return 0.0
+    try:
+        with wave.open(io.BytesIO(data)) as w:
+            rate = w.getframerate()
+            return w.getnframes() / rate if rate > 0 else 0.0
+    except (wave.Error, EOFError):
+        return 0.0
+
+
+def audio_seconds(data: Optional[bytes]) -> float:
+    return wav_seconds(data) or mp3_seconds(data)
+
+
 def ack_floor_seconds(audio: Optional[bytes]) -> float:
-    return min(mp3_seconds(audio) * ACK_FLOOR_FACTOR, ACK_FLOOR_MAX_SEC)
+    return min(audio_seconds(audio) * ACK_FLOOR_FACTOR, ACK_FLOOR_MAX_SEC)
 
 # A one- or two-word utterance whose every token JARVIS just said is only an
 # echo if it arrived while that speech was still coming out of the speaker.

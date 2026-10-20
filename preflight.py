@@ -465,14 +465,21 @@ def _check_screen_recording_sync() -> Check:
 
 
 def _check_fish_api_key_sync() -> Check:
-    """FISH_API_KEY must be set or JARVIS has no voice."""
-    if os.environ.get("FISH_API_KEY"):
+    """JARVIS needs a voice: a real FISH_API_KEY, or a local Piper voice."""
+    import tts
+    if tts.fish_configured():
         return Check(name="fish_api_key", status=STATUS_OK, message="FISH_API_KEY is set.")
+    if tts.local_available():
+        return Check(
+            name="fish_api_key", status=STATUS_OK,
+            message=f"No Fish key; speaking with the local Piper voice ({tts.piper_model_path().name}).")
     return Check(
         name="fish_api_key",
         status=STATUS_FAIL,
         message="FISH_API_KEY is not set.",
-        remedy="Get a Fish Audio API key from fish.audio and set FISH_API_KEY in .env.",
+        remedy=("Get a Fish Audio API key from fish.audio and set FISH_API_KEY in .env, "
+                "or install the local voice: pip install -r requirements-linux.txt && "
+                "python -m piper.download_voices --download-dir data/voices es_ES-davefx-medium."),
     )
 
 

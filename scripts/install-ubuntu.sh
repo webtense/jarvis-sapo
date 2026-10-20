@@ -13,8 +13,13 @@ sudo apt-get install -y --no-install-recommends \
 echo "==> Entorno virtual de Python"
 python3 -m venv .venv
 .venv/bin/pip install --quiet --upgrade pip
-.venv/bin/pip install --quiet -r requirements.txt
+.venv/bin/pip install --quiet -r requirements.txt -r requirements-linux.txt
 .venv/bin/python -m playwright install chromium
+
+echo "==> Voz local (Piper, ~60 MB, sin clave ni red después de descargarla)"
+VOICE="${PIPER_VOICE:-es_ES-davefx-medium}"
+[[ -f "data/voices/$VOICE.onnx" ]] || \
+  .venv/bin/python -m piper.download_voices --download-dir data/voices "$VOICE"
 
 echo "==> Frontend"
 (cd frontend && npm ci)
