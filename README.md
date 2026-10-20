@@ -49,6 +49,16 @@ invented.*
 
 ---
 
+## Ubuntu
+
+Fork `jarvis-ubuntu`. Lo que hay en el repo:
+
+- **Instalación:** `scripts/install-ubuntu.sh`. Comprueba Python 3.11+ y Node 18+, instala los paquetes del sistema (pide `sudo`), crea `.venv`, instala Playwright/Chromium, descarga la voz local de Piper, hace `npm ci` en `frontend/`, genera `cert.pem`/`key.pem` y copia `.env.example` a `.env`. Si los paquetes ya están instalados, `JARVIS_SKIP_APT=1 scripts/install-ubuntu.sh` omite `apt` y `sudo`.
+- **Arranque:** `scripts/start-ubuntu.sh`. El backend escucha solo en `127.0.0.1` y Vite en el puerto fijo 5173 (`http://localhost:5173`, panel en `/dashboard.html`).
+- **Voz:** sin clave, con Piper local. La voz por defecto es `es_ES-davefx-medium`; se cambia con `PIPER_VOICE`.
+- **Acceso por túnel SSH:** desde otro equipo, `ssh -L 5173:127.0.0.1:5173 usuario@servidor` y abre `http://localhost:5173`. Si usas otro puerto local (por ejemplo `-L 5174:127.0.0.1:5173`), declara ese origen en `.env`: `JARVIS_ALLOWED_ORIGINS=http://localhost:5174`.
+- **Permisos en otras sesiones:** para que JARVIS pueda contestar a los permisos de otras sesiones de Claude Code, lanza `claude` con `scripts/jarvis-claude` (usa tmux; Wayland no permite pulsar teclas en otras ventanas).
+
 ## What it costs
 
 **No AI API usage, and none is possible.** JARVIS's brain is a Claude Code
