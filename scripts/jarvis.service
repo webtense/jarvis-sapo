@@ -10,10 +10,12 @@ Wants=network-online.target
 Type=simple
 User=__USER__
 WorkingDirectory=__DIR__
-Environment=PATH=__HOME__/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:__HOME__/.local/bin
 ExecStart=__DIR__/scripts/start-ubuntu.sh
 Restart=on-failure
 RestartSec=10
+# /usr/bin va antes que ~/.local/bin a propósito: ahí puede haber un envoltorio de npm
+# (guardia anticompilación) que bloquea `npm run dev`; claude sí está en ~/.local/bin.
 # El servidor escucha solo en 127.0.0.1; nada de esto se expone a la red.
 NoNewPrivileges=true
 PrivateTmp=true
