@@ -519,6 +519,20 @@ EXEMPT = {
         "response envelope, never rendered into prose"),
     "ha_readonly_mcp.main": (
         "the same JSON-RPC envelope id, echoed on the internal-error path"),
+    "jarvis_bridge_mcp.handle": (
+        "`id` is a JSON-RPC message id off the stdio channel between this "
+        "process and the CLI, echoed back in the response envelope and never "
+        "rendered into prose. The bridge's own texts are cleaned, attributed "
+        "and rate-limited server-side; tests/test_bridge.py drives them"),
+    "jarvis_bridge_mcp.main": (
+        "the same JSON-RPC envelope id, echoed on the parse-error path"),
+    "server.bridge_notify": (
+        "`args.get(\"title\")` is the bridge caller's notification title, "
+        "an untrusted session's own words. It goes through bridge.clean_text "
+        "(strip_markdown_for_tts, control characters, 80-character limit) "
+        "and is handed to notifier.notify as an ARGUMENT of notify-send or "
+        "osascript, never into a command line, the brain's context or speech; "
+        "covered by tests/test_bridge.py"),
     "projects_view._pick_primary_path": (
         "`cwd` and `project_path` are compared and one is chosen; the "
         "function returns a PATH, and the Projects tab renders it through "

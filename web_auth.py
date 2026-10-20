@@ -467,6 +467,36 @@ def token_matches(supplied: Optional[str]) -> bool:
         return False
 
 
+# The MCP bridge (`/internal/bridge/*`) has its OWN door. It is for other
+# Claude Code sessions on this machine, which are not the browser (no Origin
+# worth anything) and must not hold the tool token (which can spawn runs). So
+# on these paths — every method, reads included — the ONLY thing that admits
+# a request is the bridge token. Neither a good Origin nor the tool token is
+# enough, and the bridge token admits nothing outside this prefix: it is not
+# accepted by `token_matches`, so every other gate above still refuses it.
+BRIDGE_PATH_PREFIX = "/internal/bridge"
+
+
+def is_bridge_path(path: Optional[str]) -> bool:
+    return bool(path) and path.startswith(BRIDGE_PATH_PREFIX)
+
+
+def bridge_token_matches(supplied: Optional[str]) -> bool:
+    """Constant-time compare against the bridge token (and ONLY that one)."""
+    if not supplied:
+        return False
+    try:
+        expected = data_paths.ensure_bridge_token()
+    except Exception as e:                                   # pragma: no cover
+        log.error(f"could not read the bridge token: {e}")
+        return False
+    try:
+        return secrets.compare_digest(supplied.encode("utf-8", "ignore"),
+                                      expected.encode("utf-8"))
+    except (TypeError, ValueError):                          # pragma: no cover
+        return False
+
+
 def request_authorized(origin: Optional[str],
                        authorization: Optional[str]) -> bool:
     return origin_allowed(origin) or token_matches(bearer(authorization))
@@ -518,7 +548,17 @@ class OriginGuard:
                     content={"error": "Refused: that Host is not one JARVIS "
                                       "answers to."})(scope, receive, send)
             return
-        if kind == "websocket":
+        if kind == "http" and is_bridge_path(scope.get("path")):
+            # Its own door, see BRIDGE_PATH_PREFIX. Never logs the header.
+            if not bridge_token_matches(
+                    bearer(_header(scope, b"authorization"))):
+                self._log_refusal(scope, scope.get("method", "?"))
+                await JSONResponse(
+                    status_code=401,
+                    content={"error": "Refused: the bridge needs its own "
+                                      "token."})(scope, receive, send)
+                return
+        elif kind == "websocket":
             if not scope_authorized(scope):
                 self._log_refusal(scope, "websocket")
                 # Closing before `accept` is how ASGI says "no": uvicorn

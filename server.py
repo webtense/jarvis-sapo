@@ -65,6 +65,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import actions
+import bridge
 import builds
 import preflight
 import project_maker
@@ -1647,6 +1648,9 @@ async def _handle_utterance(text: str) -> None:
             line = "One moment, sir — my language systems are still starting."
         await speech.say(line, Priority.NORMAL)
         return
+    # The brain is about to speak: a pending "keep this memory?" is no longer
+    # the last question the user heard, so a "yes" must reach the brain.
+    bridge_state.note_brain_turn()
     utt = speech.begin_turn()
     try:
         try:
@@ -6331,6 +6335,276 @@ TOOL_HANDLERS.update({
 ACTING_TOOLS.update({"remember", "project_note", "write_journal"})
 
 
+# ---------------------------------------------------------------------------
+# The MCP bridge: other Claude Code sessions talk to the user through JARVIS
+# ---------------------------------------------------------------------------
+#
+# `jarvis_bridge_mcp.py` forwards four calls here: say something, ask the user
+# something, post a desktop notification, PROPOSE a memory. Its own token, its
+# own door (`web_auth.BRIDGE_PATH_PREFIX`), and the rules in `bridge.py`.
+#
+# What this section must never do, and `tests/test_bridge.py` pins:
+#   * call anything in TOOL_HANDLERS — the bridge has no acting tool, and no
+#     route here can reach one. The single write, `tool_remember` in
+#     `_bridge_decide`, happens only after the USER confirmed a proposal;
+#   * write memory on a caller's say-so;
+#   * hand back the token, or put it in a log line.
+#
+# Everything a session sends is untrusted text, spoken in the user's own
+# assistant's voice. It is cleaned with `strip_markdown_for_tts`, length-capped,
+# rate-limited, spoken at a non-urgent priority, and ALWAYS introduced by who
+# said it.
+
+bridge_state = bridge.Bridge(prepare=strip_markdown_for_tts)
+
+
+def _bridge_reply(ok: bool, text: str) -> JSONResponse:
+    return JSONResponse({"ok": ok, "text": text})
+
+
+async def _bridge_args(request: Request) -> dict:
+    """The authenticated, size-bounded JSON object of a bridge call.
+
+    The token is checked HERE as well as in `web_auth.OriginGuard`: the guard
+    is the door, this is the lock on the room, and a route that someone
+    mounts differently later still refuses a stranger.
+    """
+    if not web_auth.bridge_token_matches(
+            web_auth.bearer(request.headers.get("Authorization"))):
+        raise HTTPException(status_code=401, detail="bad token")
+    raw = await request.body()
+    if len(raw) > bridge.BODY_MAX_BYTES:
+        raise bridge.Refused("Petición demasiado grande.")
+    try:
+        body = json.loads(raw.decode("utf-8", errors="replace") or "{}")
+    except ValueError:
+        raise bridge.Refused("Petición ilegible.")
+    if not isinstance(body, dict):
+        raise bridge.Refused("El cuerpo debe ser un objeto.")
+    return body
+
+
+async def _bridge_say(spoken: str, *, priority: Priority,
+                      immediate: Optional[bool]):
+    """Speak `spoken` if somebody can hear it; None if nobody can."""
+    if speech is None or not voice_clients:
+        return None
+    utt = await speech.say(spoken, priority, immediate=immediate)
+    bridge_state.track(utt)
+    return utt
+
+
+async def _bridge_notify_fallback(label: str, text: str) -> bool:
+    """No voice client: the user is not in the browser tab. A desktop
+    notification is the only way left to reach him. Never raises."""
+    if not notifier.available():
+        return False
+    try:
+        return bool(await notifier.notify("JARVIS", text, subtitle=label))
+    except Exception as e:
+        log.warning("bridge notification failed: %s", e)
+        return False
+
+
+@app.post("/internal/bridge/speak")
+async def bridge_speak(request: Request):
+    try:
+        args = await _bridge_args(request)
+        label = bridge.clean_label(args.get("session"))
+        text = bridge.clean_text(args.get("text"), bridge.SPEAK_MAX, "text",
+                                 strip_markdown_for_tts)
+        bridge_state.admit("speak", text)
+        if not bridge_state.room_to_speak():
+            raise bridge.Refused("JARVIS ya tiene varios avisos en cola.")
+    except bridge.Refused as e:
+        return _bridge_reply(False, str(e))
+    # LOW: batched, and only at a pause. Never URGENT, and never over the
+    # user's own voice or the brain's answer.
+    utt = await _bridge_say(bridge.frame_speak(label, text),
+                            priority=Priority.LOW, immediate=None)
+    if utt is None:
+        if await _bridge_notify_fallback(label, text):
+            return _bridge_reply(True, "Nadie escucha por voz; enviado como "
+                                       "notificación de escritorio.")
+        return _bridge_reply(False, "JARVIS no tiene ningún cliente de voz "
+                                    "conectado ahora mismo.")
+    return _bridge_reply(True, "En cola: JARVIS lo dirá en la próxima pausa.")
+
+
+@app.post("/internal/bridge/ask")
+async def bridge_ask(request: Request):
+    try:
+        args = await _bridge_args(request)
+        label = bridge.clean_label(args.get("session"))
+        text = bridge.clean_text(args.get("question"), bridge.QUESTION_MAX,
+                                 "question", strip_markdown_for_tts)
+        timeout = bridge.clamp_timeout(args.get("timeout_sec"))
+        bridge_state.admit("ask", text)
+        q = bridge_state.open_question(text, label)
+    except bridge.Refused as e:
+        return _bridge_reply(False, str(e))
+    try:
+        # NORMAL but not immediate: waits for the user to stop talking, is
+        # not batched, and is not URGENT — it cannot cut anybody off.
+        utt = await _bridge_say(bridge.frame_ask(label, text),
+                                priority=Priority.NORMAL, immediate=False)
+        if utt is None:
+            await _bridge_notify_fallback(label, text)
+        else:
+            # The answer is only listened for once the question has been
+            # SAID: until then the microphone is hearing JARVIS himself.
+            await speech.wait_for(utt, timeout=bridge.SPEAK_WAIT_MAX)
+        answer = await bridge_state.wait_answer(q, timeout)
+    finally:
+        bridge_state.close_question(q)
+    if answer is None:
+        return _bridge_reply(True, bridge.NO_ANSWER)
+    return _bridge_reply(True, f"Respuesta del usuario: {answer}")
+
+
+@app.post("/internal/bridge/notify")
+async def bridge_notify(request: Request):
+    try:
+        args = await _bridge_args(request)
+        label = bridge.clean_label(args.get("session"))
+        title = bridge.clean_text(args.get("title"), bridge.NOTIFY_TITLE_MAX,
+                                  "title", strip_markdown_for_tts)
+        message = bridge.clean_text(args.get("message"),
+                                    bridge.NOTIFY_MESSAGE_MAX, "message",
+                                    strip_markdown_for_tts)
+        bridge_state.admit("notify", f"{title}\n{message}")
+    except bridge.Refused as e:
+        return _bridge_reply(False, str(e))
+    if not notifier.available():
+        return _bridge_reply(False, "Este equipo no puede mostrar "
+                                    "notificaciones de escritorio.")
+    # Arguments to notify-send / osascript, never a command line: see
+    # notifier.py. The title is the caller's, the subtitle says who.
+    ok = await notifier.notify(title, message, subtitle=label)
+    return _bridge_reply(bool(ok), "Notificación enviada." if ok
+                         else "No pude mostrar la notificación.")
+
+
+@app.post("/internal/bridge/remember")
+async def bridge_remember(request: Request):
+    """A PROPOSAL, never a write. The fact waits in memory (this process,
+    bounded) until the user says yes — aloud, or on the dashboard."""
+    try:
+        args = await _bridge_args(request)
+        label = bridge.clean_label(args.get("session"))
+        fact = bridge.clean_text(args.get("fact"), bridge.FACT_MAX, "fact",
+                                 strip_markdown_for_tts)
+        bridge_state.admit("remember", fact)
+    except bridge.Refused as e:
+        return _bridge_reply(False, str(e))
+    proposal = bridge_state.propose(fact, label)
+    epoch = bridge_state.brain_epoch
+    utt = await _bridge_say(bridge.frame_remember(label, fact),
+                            priority=Priority.NORMAL, immediate=False)
+    if utt is not None:
+        # Queued is not asked: the proposal only starts listening for a
+        # spoken yes once the announcement has been played whole.
+        _spawn(_bridge_announced_when_spoken(proposal.id, utt, epoch))
+    return _bridge_reply(True, "Propuesta pendiente: no se guardará en la "
+                               "memoria hasta que el usuario la confirme.")
+
+
+async def _bridge_announced_when_spoken(pid: str, utt, epoch: int) -> None:
+    """Arm a proposal for a spoken yes/no once its announcement was heard in
+    full. A cancelled, timed-out or interrupted announcement arms nothing."""
+    try:
+        ok = await speech.wait_for(utt, timeout=bridge.SPEAK_WAIT_MAX)
+    except Exception as e:
+        log.warning("bridge: waiting for a proposal announcement failed: %s", e)
+        return
+    if ok:
+        bridge_state.mark_announced(pid, epoch)
+
+
+def _bridge_memory_exists(fact: str) -> bool:
+    """Would saving `fact` overwrite a memory that is already there?
+    `add_to_index` / `write_memory` update in place when the title matches."""
+    slug = jarvis_memory.slugify(jarvis_memory.one_line(fact, 60))
+    return (slug in jarvis_memory.list_memories()
+            or any(e["slug"] == slug for e in jarvis_memory.index_entries()))
+
+
+async def _bridge_decide(pid: str, accept: bool, *, spoken: bool = False) -> str:
+    """The user's decision on one proposal. The only write in the bridge."""
+    if spoken and accept:
+        pending = bridge_state.proposals.get(pid)
+        if pending is not None and _bridge_memory_exists(pending.fact):
+            # A spoken "yes" is a thin consent for REPLACING something the
+            # user already keeps: that one is confirmed on the dashboard.
+            return ("Ya existe una memoria con ese título; confírmala en el "
+                    "panel si quieres sustituirla.")
+    proposal = bridge_state.take(pid)
+    if proposal is None:
+        return "Esa propuesta ya no está pendiente."
+    if not accept:
+        return "Descartado."
+    title = jarvis_memory.one_line(proposal.fact, 60)
+    note = (f"{proposal.fact}\n\n(Propuesto por la sesión {proposal.label}; "
+            f"confirmado por el usuario.)")
+    # The same writer the brain's `remember` uses, so the index bound and
+    # every refusal in jarvis_memory still apply.
+    result = tool_remember({"title": title, "body": note,
+                            "hook": proposal.fact})
+    return "Guardado en la memoria." if result == "Noted." else result
+
+
+async def _bridge_take_utterance(text: str) -> bool:
+    """Called with the user's final words BEFORE the brain sees them.
+
+    True means the words were an answer to a bridge question or a yes/no to a
+    memory proposal, and must not go on. Both are decided here by matching
+    words, never by the model: the proposal came from an untrusted session
+    and the brain is the thing it may be talking to.
+    """
+    if bridge_state.offer_answer(text):
+        log.info("bridge: the user's answer was passed to a session")
+        return True
+    proposal = bridge_state.awaiting_decision()
+    if proposal is None:
+        return False
+    decision = bridge.classify_decision(text)
+    if decision is None:
+        return False
+    line = await _bridge_decide(proposal.id, decision == "yes", spoken=True)
+    if speech is not None:
+        await speech.say(line, Priority.NORMAL)
+    return True
+
+
+class _BridgeAnswer(BaseModel):
+    text: str
+
+
+@app.get("/api/bridge/pending")
+async def bridge_pending():
+    """For the dashboard: the open question and the proposals waiting. Texts
+    are untrusted and are drawn with textContent."""
+    return bridge_state.snapshot()
+
+
+@app.post("/api/bridge/answer")
+async def bridge_answer(body: _BridgeAnswer):
+    text = body.text.strip()[:bridge.QUESTION_MAX]
+    if not text or not bridge_state.offer_answer(text, typed=True):
+        return JSONResponse(status_code=409,
+                            content={"error": "No hay ninguna pregunta esperando."})
+    return {"ok": True}
+
+
+@app.post("/api/bridge/memory/{pid}/{decision}")
+async def bridge_memory_decision(pid: str, decision: str):
+    if decision not in ("confirm", "reject"):
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    if pid not in bridge_state.proposals:
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    return {"ok": True, "text": await _bridge_decide(pid, decision == "confirm")}
+
+
 @app.websocket("/ws/sessions")
 async def ws_sessions(websocket: WebSocket):
     await websocket.accept()
@@ -6691,6 +6965,8 @@ async def voice_handler(ws: WebSocket):
                     log.info(f"User ({verdict}, ignored, {ago}): {text}")
                     continue
                 log.info(f"User: {text}")
+                if await _bridge_take_utterance(text):
+                    continue
                 if _is_fresh_start(text):
                     _spawn(_start_fresh())
                     continue

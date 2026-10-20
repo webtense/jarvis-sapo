@@ -363,6 +363,39 @@ def tool_token_path() -> Path:
 def ensure_tool_token() -> str:
     """Create the loopback tool token if absent and return it.
 
+    See `_ensure_token_file` for how the file is created and adopted.
+    """
+    return _ensure_token_file(tool_token_path())
+
+
+def bridge_token_path() -> Path:
+    """The bearer token of the MCP bridge (`/internal/bridge/*`).
+
+    Deliberately NOT under `brain_home()`: that is the brain's working
+    directory, and this token is for other people's Claude Code sessions. It
+    is a different file with a different random value from the tool token,
+    because the two open different doors — see `ensure_bridge_token`.
+    """
+    return data_dir() / "bridge-token"
+
+
+def ensure_bridge_token() -> str:
+    """Create the bridge token if absent and return it.
+
+    A SEPARATE secret of NARROW scope. The tool token admits a caller to
+    every acting tool and to every state-changing HTTP route; this one admits
+    exactly four loopback routes that can say something, ask something, post
+    a notification or PROPOSE a memory — never act, never write memory by
+    itself. It is handed to every Claude Code session on the machine (via
+    `claude mcp add`), so it must not be the one that can spawn runs. It is
+    never returned by any API and never logged.
+    """
+    return _ensure_token_file(bridge_token_path())
+
+
+def _ensure_token_file(path: Path) -> str:
+    """Create a 0600 token file if absent and return its contents.
+
     The token is what admits a caller to JARVIS's acting tools and to every
     state-changing HTTP route (see web_auth), so it is created with O_EXCL at
     mode 0600 directly — never briefly world-readable at umask permissions
@@ -383,7 +416,6 @@ def ensure_tool_token() -> str:
     """
     import secrets
     import stat as _stat
-    path = tool_token_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
     token = secrets.token_urlsafe(32)
