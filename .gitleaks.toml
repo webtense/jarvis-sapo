@@ -1,0 +1,10 @@
+# Falsos positivos conocidos: datos de prueba del upstream, no secretos.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fixtures de tests (cabecera PEM de ejemplo y clave WebSocket de RFC 6455)"
+paths = [
+  '''tests/test_repo_tools\.py''',
+  '''tests/test_web_security\.py''',
+]

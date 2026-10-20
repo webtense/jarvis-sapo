@@ -22,8 +22,16 @@ on:
 
 jobs:
   pytest:
-    runs-on: macos-latest
+    name: pytest (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # Ubuntu is the jarvis-ubuntu port. It is allowed to fail until the
+    # platform layer (F1) lands; macOS stays the upstream reference.
+    continue-on-error: ${{ matrix.os == 'ubuntu-latest' }}
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -43,7 +51,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Playwright Chromium
-        run: python -m playwright install chromium
+        run: python -m playwright install --with-deps chromium
 
       - name: Frontend dependencies
         run: npm ci
@@ -61,3 +69,15 @@ jobs:
         env:
           JARVIS_BRAIN_AUTOSTART: "0"
         run: pytest -v -o faulthandler_timeout=300 -p no:cacheprovider
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan for secrets
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks detect --source . --config .gitleaks.toml --redact --no-banner
