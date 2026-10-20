@@ -11,6 +11,8 @@ import os
 import re
 import shutil
 
+import host
+
 log = logging.getLogger("jarvis.actions")
 
 async def _mark_terminal_as_jarvis(revert_after: float = 5.0):
@@ -81,7 +83,12 @@ def applescript_escape(s: str) -> str:
 
 
 async def open_terminal(command: str = "") -> dict:
-    """Open Terminal.app and optionally run a command. Marks it blue for JARVIS."""
+    """Open Terminal.app and optionally run a command. Marks it blue for JARVIS.
+
+    On Linux: the first of gnome-terminal / x-terminal-emulator / xterm found.
+    """
+    if host.is_linux():
+        return await _open_terminal_linux(command)
     if command:
         escaped = applescript_escape(command)
         script = (
@@ -113,6 +120,80 @@ async def open_terminal(command: str = "") -> dict:
     }
 
 
+_LINUX_TERMINALS = ("gnome-terminal", "x-terminal-emulator", "xterm")
+_LINUX_CHROMES = ("google-chrome", "google-chrome-stable", "chromium",
+                  "chromium-browser")
+
+
+async def _spawn_detached(argv: list[str]) -> tuple[bool, str]:
+    """Start a GUI program and do not wait for it to quit. Argument list only."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
+        )
+    except OSError as e:
+        return False, str(e)
+    try:
+        # A GUI launcher that is going to fail does so at once; one that is
+        # going to succeed keeps running, so a short wait tells them apart.
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=1.5)
+    except asyncio.TimeoutError:
+        return True, ""
+    return proc.returncode == 0, stderr.decode(errors="replace")
+
+
+async def _open_terminal_linux(command: str) -> dict:
+    for name in _LINUX_TERMINALS:
+        binary = shutil.which(name)
+        if not binary:
+            continue
+        if name == "gnome-terminal":
+            argv = [binary]
+            if command:
+                argv += ["--", "bash", "-lc", f"{command}; exec bash"]
+        else:
+            argv = [binary]
+            if command:
+                argv += ["-e", "bash", "-lc", f"{command}; exec bash"]
+        ok, err = await _spawn_detached(argv)
+        if ok:
+            return {"success": True, "confirmation": "Terminal is open, sir."}
+        log.error(f"open_terminal ({name}) failed: {err}")
+    return {"success": False,
+            "confirmation": "I had trouble opening Terminal, sir."}
+
+
+async def _open_browser_linux(url: str, browser: str) -> dict:
+    # The URL becomes an argv entry, so quoting is not the risk; an argv entry
+    # that LOOKS like an option ("--gpu-launcher=...") is. Only web and file
+    # URLs get through, and none of those can start with a dash.
+    if not re.match(r"(https?|file)://", url or "", re.IGNORECASE):
+        return {"success": False,
+                "confirmation": "I'll only open web addresses, sir."}
+    if browser.lower() == "firefox":
+        app_name, candidates = "Firefox", ("firefox",)
+    else:
+        app_name, candidates = "Chrome", _LINUX_CHROMES
+    binary = next((b for b in map(shutil.which, candidates) if b), None)
+    if binary is None:
+        binary = shutil.which("xdg-open")
+        app_name = "your browser"
+    if binary is None:
+        return {"success": False,
+                "confirmation": f"{app_name} ran into a problem, sir."}
+    ok, err = await _spawn_detached([binary, url])
+    if not ok:
+        log.error(f"open_browser ({app_name}) failed: {err}")
+    return {
+        "success": ok,
+        "confirmation": f"Pulled that up in {app_name}, sir." if ok else f"{app_name} ran into a problem, sir.",
+    }
+
+
 async def open_browser(url: str, browser: str = "chrome") -> dict:
     """Open URL in user's browser (Chrome or Firefox).
 
@@ -125,6 +206,8 @@ async def open_browser(url: str, browser: str = "chrome") -> dict:
     README, so this is a straight line from attacker text to a shell.
     `tests/test_applescript_url_injection.py` runs the payload.
     """
+    if host.is_linux():
+        return await _open_browser_linux(url, browser)
     escaped_url = applescript_escape(url)
 
     if browser.lower() == "firefox":
@@ -165,7 +248,12 @@ async def open_chrome(url: str) -> dict:
 
 
 async def get_chrome_tab_info() -> dict:
-    """Read the current Chrome tab's title and URL via AppleScript."""
+    """Read the current Chrome tab's title and URL via AppleScript.
+
+    Linux has no equivalent without a debugging port, so it answers {}.
+    """
+    if host.is_linux():
+        return {}
     script = (
         'tell application "Google Chrome"\n'
         "    set tabTitle to title of active tab of front window\n"
@@ -211,7 +299,7 @@ def _vscode_command(path: str) -> list[str] | None:
     binary = shutil.which("code")
     if binary:
         return [binary, str(path)]
-    if os.path.isdir(VSCODE_APP):
+    if not host.is_linux() and os.path.isdir(VSCODE_APP):
         return ["open", "-a", VSCODE_APP, str(path)]
     return None
 
@@ -221,7 +309,7 @@ async def open_in_editor(path: str) -> dict:
     argv = _vscode_command(path)
     editor = "VS Code"
     if argv is None:
-        argv = ["open", str(path)]
+        argv = ["xdg-open" if host.is_linux() else "open", str(path)]
         editor = "your editor"
 
     try:

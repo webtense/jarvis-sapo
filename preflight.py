@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Optional
 
 import claude_env
+import host
 import screen
 
 log = logging.getLogger("jarvis.preflight")
@@ -228,6 +229,21 @@ async def _read_oauth_refresh_expiry(config_dir: Path, timeout: float) -> Option
     keychain entry, or output that doesn't parse the way expected. Callers
     must not treat None as a clean bill of health.
     """
+    if host.is_linux():
+        # Linux keeps the same JSON in ~/.claude/.credentials.json (0600).
+        # Only the expiry is read out of it; no token value is returned,
+        # logged or kept.
+        try:
+            data = json.loads((config_dir / ".credentials.json").read_text("utf-8"))
+        except (OSError, ValueError):
+            return None
+        oauth = data.get("claudeAiOauth") if isinstance(data, dict) else None
+        if not isinstance(oauth, dict):
+            return None
+        expires_at_ms = oauth.get("refreshTokenExpiresAt")
+        if not isinstance(expires_at_ms, (int, float)):
+            return None
+        return expires_at_ms / 1000.0
     if sys.platform != "darwin" or not shutil.which("security"):
         return None
     service = _keychain_service_name(config_dir)
@@ -356,6 +372,12 @@ async def _check_accessibility(timeout: float = DEFAULT_CHECK_TIMEOUT) -> Check:
     macOS version, this comes back as a WARN (unrecognised error) rather
     than mis-reporting OK, so it fails safe.
     """
+    if host.is_linux():
+        return Check(
+            name="accessibility",
+            status=STATUS_OK,
+            message="Not applicable on Linux: keystrokes go through tmux, not Accessibility.",
+        )
     if sys.platform != "darwin" or not shutil.which("osascript"):
         return Check(
             name="accessibility",
@@ -411,6 +433,9 @@ def _check_screen_recording_sync() -> Check:
     one) and NEVER captures anything to find out -- a screenshot the user did
     not ask for, at every boot, is precisely what this capability must not do.
     """
+    if host.is_linux():
+        return Check(name="screen_recording", status=STATUS_OK,
+                     message="Not applicable on Linux: the desktop's own screenshot tool is used.")
     try:
         granted = screen.screen_recording_granted()
     except Exception as e:  # the module must never take startup down
@@ -448,6 +473,34 @@ def _check_fish_api_key_sync() -> Check:
         status=STATUS_FAIL,
         message="FISH_API_KEY is not set.",
         remedy="Get a Fish Audio API key from fish.audio and set FISH_API_KEY in .env.",
+    )
+
+
+def _check_linux_tools_sync() -> Check:
+    """The Linux stand-ins for what macOS ships: say which are missing.
+
+    Each one gates a single capability and none gates startup, so a gap is a
+    warning that names the package, never a failure.
+    """
+    if not host.is_linux():
+        return Check(name="linux_tools", status=STATUS_OK,
+                     message="Not applicable off Linux.")
+    missing = []
+    if not shutil.which("notify-send"):
+        missing.append("notify-send (libnotify-bin): desktop notifications")
+    if not shutil.which("tmux"):
+        missing.append("tmux: answering permission prompts in other sessions")
+    if not (shutil.which("magick") or shutil.which("convert")):
+        missing.append("imagemagick: look_at_screen")
+    if not any(shutil.which(t) for t in ("gnome-screenshot", "spectacle", "grim", "scrot")):
+        missing.append("gnome-screenshot: look_at_screen")
+    if not missing:
+        return Check(name="linux_tools", status=STATUS_OK,
+                     message="Linux helper tools are installed.")
+    return Check(
+        name="linux_tools", status=STATUS_WARN,
+        message="Missing Linux helper tools: " + "; ".join(missing) + ".",
+        remedy="sudo apt install libnotify-bin tmux imagemagick gnome-screenshot",
     )
 
 
@@ -628,7 +681,8 @@ def enable_cross_session_inbound() -> tuple[bool, str]:
 
 _ASYNC_CHECKS = (_check_claude_cli, _check_claude_login, _check_accessibility)
 _SYNC_CHECKS = (_check_fish_api_key_sync, _check_anthropic_key_leftover_sync,
-                _check_cross_session_inbound_sync, _check_screen_recording_sync)
+                _check_cross_session_inbound_sync, _check_screen_recording_sync,
+                _check_linux_tools_sync)
 
 
 async def _run_one(fn, *, is_async: bool, timeout: float) -> Check:
@@ -693,6 +747,8 @@ def _phrase_for(check: Check) -> str:
         if "not been granted" in msg:
             return "I don't have Screen Recording permission"
         return "Screen Recording couldn't be checked"
+    if name == "linux_tools":
+        return "some Linux helper tools are missing"
     if name == "fish_api_key":
         return "I have no Fish Audio key"
     if name == "anthropic_key_leftover":

@@ -44,6 +44,7 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import ctypes.util
+import json
 import logging
 import shutil
 import struct
@@ -51,6 +52,8 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+import host
 
 log = logging.getLogger("jarvis.screen")
 
@@ -288,6 +291,8 @@ async def capture_screen(display: int | None = None) -> Shot:
     """
     if screen_recording_granted() is False:
         raise ScreenError(_NO_PERMISSION)
+    if host.is_linux():
+        return await _capture_screen_linux()
 
     workdir = Path(tempfile.mkdtemp(prefix="jarvis-screen-"))
     try:
@@ -334,6 +339,185 @@ async def capture_screen(display: int | None = None) -> Shot:
     finally:
         # The capture is on disk for as long as this takes and no longer.
         shutil.rmtree(workdir, ignore_errors=True)
+
+
+# ── Linux ──────────────────────────────────────────────────────────────────
+#
+# Same contract as the macOS path (one downscaled PNG, never persisted, blank
+# frames refused), different tools. ImageMagick does what `sips` does here:
+# shrink, and decode a 32px BMP for the blank check. Wayland compositors do not
+# let a client read the screen, so the grab itself goes through whichever of
+# these the desktop actually answers to, in order.
+
+_LINUX_GRABBERS = (
+    # GNOME (Ubuntu): goes through the screenshot portal / Shell service.
+    ("gnome-screenshot", lambda out: ["gnome-screenshot", "-f", out]),
+    # KDE.
+    ("spectacle", lambda out: ["spectacle", "-b", "-n", "-f", "-o", out]),
+    # wlroots compositors (sway, Hyprland). Does nothing on GNOME.
+    ("grim", lambda out: ["grim", out]),
+    # X11 sessions.
+    ("scrot", lambda out: ["scrot", "-o", out]),
+    ("import", lambda out: ["import", "-window", "root", out]),
+)
+
+
+def _imagemagick() -> str | None:
+    return shutil.which("magick") or shutil.which("convert")
+
+
+async def _capture_screen_linux() -> Shot:
+    magick = _imagemagick()
+    if magick is None:
+        raise ScreenError(
+            "I need ImageMagick to shrink a screenshot, sir, and it isn't installed")
+    workdir = Path(tempfile.mkdtemp(prefix="jarvis-screen-"))
+    try:
+        shot_path = workdir / "screen.png"
+        tried = []
+        for name, build in _LINUX_GRABBERS:
+            if shutil.which(name) is None:
+                continue
+            tried.append(name)
+            rc, _out, err = await _run(*build(str(shot_path)),
+                                       timeout=CAPTURE_TIMEOUT_SEC)
+            if rc == 0 and shot_path.exists() and _png_size(shot_path.read_bytes()):
+                break
+            log.warning(f"{name} could not grab the screen: {err.strip()[:200]}")
+            shot_path.unlink(missing_ok=True)
+        else:
+            if not tried:
+                raise ScreenError(
+                    "there's no screenshot tool installed, sir — "
+                    "gnome-screenshot would do")
+            raise ScreenError("I couldn't get a picture of your screen, sir")
+
+        small_path = workdir / "small.png"
+        # `>` only ever shrinks; a screen already under the edge is left alone.
+        rc, _out, err = await _run(
+            magick, str(shot_path), "-resize",
+            f"{SHOT_MAX_EDGE}x{SHOT_MAX_EDGE}>", str(small_path),
+            timeout=RESIZE_TIMEOUT_SEC)
+        small = small_path.read_bytes() if small_path.exists() else b""
+        size = _png_size(small) if small else None
+        if rc != 0 or size is None:
+            log.warning(f"imagemagick could not resize the capture: {err.strip()[:200]}")
+            raise ScreenError(
+                "I couldn't get your screen down to a sensible size, sir")
+        if len(small) > MAX_SHOT_BYTES:
+            raise ScreenError("that picture came out far too large to send, sir")
+
+        sample = workdir / "sample.bmp"
+        rc, _out, _err = await _run(
+            magick, str(small_path), "-resize",
+            f"{BLANK_SAMPLE_EDGE}x{BLANK_SAMPLE_EDGE}", "-type", "truecolor",
+            f"bmp3:{sample}", timeout=RESIZE_TIMEOUT_SEC)
+        if rc == 0 and sample.exists() and _is_blank(_bmp_pixels(sample.read_bytes())):
+            raise ScreenError(
+                "your screen came back blank, sir — the desktop may be refusing "
+                "screen capture")
+        return Shot(png=small, width=size[0], height=size[1])
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+_WINDOWS_UNSUPPORTED = (
+    "I can't read window titles on this desktop, sir — GNOME doesn't allow it "
+    "without the Window Calls extension")
+
+
+def parse_gnome_windows(raw: str) -> list[Window]:
+    """The Window Calls extension answers a GVariant `('<json>',)` string."""
+    start, end = raw.find("["), raw.rfind("]")
+    if start < 0 or end < start:
+        return []
+    try:
+        rows = json.loads(raw[start:end + 1].replace("\\'", "'"))
+    except ValueError:
+        return []
+    return [Window(app=str(r.get("wm_class") or "").strip(),
+                   title=str(r.get("title") or "").strip(),
+                   frontmost=bool(r.get("focus")))
+            for r in rows if isinstance(r, dict) and r.get("title")]
+
+
+def parse_sway_windows(raw: str) -> list[Window]:
+    try:
+        tree = json.loads(raw)
+    except ValueError:
+        return []
+    out: list[Window] = []
+
+    def walk(node):
+        for child in node.get("nodes", []) + node.get("floating_nodes", []):
+            walk(child)
+        title = node.get("name")
+        app = node.get("app_id") or (node.get("window_properties") or {}).get("class")
+        if app and title and node.get("type") in ("con", "floating_con"):
+            out.append(Window(app=str(app), title=str(title),
+                              frontmost=bool(node.get("focused"))))
+    walk(tree)
+    return out
+
+
+def parse_hypr_windows(raw: str) -> list[Window]:
+    try:
+        rows = json.loads(raw)
+    except ValueError:
+        return []
+    return [Window(app=str(r.get("class") or ""), title=str(r.get("title") or ""),
+                   frontmost=r.get("focusHistoryID") == 0)
+            for r in rows if isinstance(r, dict) and r.get("title")]
+
+
+def parse_wmctrl_windows(raw: str, active_id: int | None) -> list[Window]:
+    """`wmctrl -lx`: `0x04000007  0 class.Name  host  The title`."""
+    out: list[Window] = []
+    for line in raw.splitlines():
+        parts = line.split(None, 4)
+        if len(parts) < 5:
+            continue
+        try:
+            wid = int(parts[0], 16)
+        except ValueError:
+            continue
+        app = parts[2].split(".")[-1]
+        out.append(Window(app=app, title=parts[4].strip(), frontmost=wid == active_id))
+    return out
+
+
+async def _list_windows_linux() -> list[Window]:
+    candidates = []
+    if shutil.which("gdbus"):
+        candidates.append((
+            ["gdbus", "call", "--session", "--dest", "org.gnome.Shell",
+             "--object-path", "/org/gnome/Shell/Extensions/Windows",
+             "--method", "org.gnome.Shell.Extensions.Windows.List"],
+            parse_gnome_windows))
+    if shutil.which("swaymsg"):
+        candidates.append((["swaymsg", "-t", "get_tree"], parse_sway_windows))
+    if shutil.which("hyprctl"):
+        candidates.append((["hyprctl", "clients", "-j"], parse_hypr_windows))
+    for argv, parse in candidates:
+        rc, stdout, _err = await _run(*argv, timeout=WINDOWS_TIMEOUT_SEC)
+        if rc == 0:
+            windows = parse(stdout)
+            if windows:
+                return windows[:MAX_WINDOWS]
+    if shutil.which("wmctrl") and not host.is_wayland():
+        rc, stdout, _err = await _run("wmctrl", "-lx", timeout=WINDOWS_TIMEOUT_SEC)
+        active = None
+        if rc == 0 and shutil.which("xprop"):
+            _rc, out, _e = await _run("xprop", "-root", "_NET_ACTIVE_WINDOW",
+                                      timeout=WINDOWS_TIMEOUT_SEC)
+            if "0x" in out:
+                try:
+                    active = int(out.rsplit("0x", 1)[1].split()[0].strip(",") , 16)
+                except ValueError:
+                    active = None
+        if rc == 0:
+            return parse_wmctrl_windows(stdout, active)[:MAX_WINDOWS]
+    raise ScreenError(_WINDOWS_UNSUPPORTED)
 
 
 # ── the cheap path ─────────────────────────────────────────────────────────
@@ -386,6 +570,8 @@ async def list_windows() -> list[Window]:
     Raises ScreenError when Accessibility is missing. An empty list would have
     JARVIS say "nothing is open" — a lie with a remedy attached.
     """
+    if host.is_linux():
+        return await _list_windows_linux()
     rc, stdout, stderr = await _run("osascript", "-e", _WINDOWS_SCRIPT,
                                     timeout=WINDOWS_TIMEOUT_SEC)
     if rc != 0:

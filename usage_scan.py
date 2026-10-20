@@ -209,6 +209,12 @@ class FileTotals:
     prompt: str = ""
     # The last turn's input+cache: what the model was actually carrying.
     context_tokens: int | None = None
+    # The last bytes read before `offset`. An inode number alone cannot say a
+    # file was replaced: Linux filesystems hand a just-freed inode straight to
+    # the next file created, so "same path, same size, same inode" is also
+    # what a rotation looks like there. An append leaves these bytes alone;
+    # a replacement does not.
+    tail: bytes = b""
 
     def copy(self) -> "FileTotals":
         """A scratch copy to parse into, so a half-finished read is thrown
@@ -290,7 +296,8 @@ def scan_file(path: Path, cache: Cache) -> tuple[FileTotals, int, bool]:
         return (prior if prior is not None else FileTotals()), 0, False
 
     if (prior is not None and prior.dev == st.st_dev and prior.ino == st.st_ino
-            and st.st_size >= prior.offset):
+            and st.st_size >= prior.offset
+            and _same_file_as_cached(path, prior)):
         if st.st_size == prior.offset:
             return prior, 0, True           # already read, to the last byte
         totals = prior.copy()
@@ -323,8 +330,24 @@ def scan_file(path: Path, cache: Cache) -> tuple[FileTotals, int, bool]:
             log.debug("unreadable transcript line in %s", path, exc_info=True)
 
     totals.offset += len(consumed)
+    totals.tail = consumed[-_TAIL_BYTES:]
     cache.put(path, totals)
     return totals, len(consumed), True
+
+
+_TAIL_BYTES = 256
+
+
+def _same_file_as_cached(path: Path, prior: "FileTotals") -> bool:
+    """Do the bytes just before the cached offset still match what was read?"""
+    if not prior.tail:
+        return True                          # nothing recorded: trust the inode
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(prior.offset - len(prior.tail))
+            return fh.read(len(prior.tail)) == prior.tail
+    except OSError:
+        return True                          # cannot look: do not accuse
 
 
 def _scan_line(totals: FileTotals, raw: bytes) -> None:

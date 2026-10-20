@@ -262,6 +262,23 @@ async def _await_status(store, run_id: str, status: str,
         f"run never reached {status!r}; last={store.get_run(run_id)}")
 
 
+async def _await_pid(store, run_id: str, timeout: float = 10.0) -> int:
+    """The child's pid, as soon as it is recorded.
+
+    For a run that is MEANT to fail quickly: polling for the `running` status
+    races it, because the run can be `running` for less than one poll interval
+    (a store that raises on the first write fails the run within ~20 ms, and a
+    faster runner misses the window).
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        run = store.get_run(run_id)
+        if run and run["pid"]:
+            return run["pid"]
+        await asyncio.sleep(0.001)
+    raise AssertionError(f"no pid recorded; last={store.get_run(run_id)}")
+
+
 # -- CRITICAL 1: cancel() must record CANCELLED, not failed/-15 -------------
 
 @pytest.mark.asyncio
@@ -344,8 +361,7 @@ async def test_store_failure_still_reaches_terminal_state(env):
     ex = mod.RunExecutor(_ExplodingStore(store), claude_path=claude,
                          grace_sec=5)
     run_id = await ex.spawn("do a thing", "proj", str(tmp), "api")
-    await _await_status(store, run_id, store.RunStatus.RUNNING)
-    pid = store.get_run(run_id)["pid"]
+    pid = await _await_pid(store, run_id)
 
     run = await ex.wait_for(run_id, timeout=15)
     assert run["status"] in store.RunStatus.TERMINAL, run

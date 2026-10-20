@@ -26,6 +26,8 @@ import logging
 import shutil
 import sys
 
+import host
+
 log = logging.getLogger("jarvis.notifier")
 
 # A notification is a glance, not an essay -- keep it short. These bound
@@ -69,6 +71,8 @@ def available() -> bool:
     Center settings, Focus/Do Not Disturb, or per-app permissions can still
     silently drop the notification even when this returns True.
     """
+    if host.is_linux():
+        return shutil.which("notify-send") is not None
     return sys.platform == "darwin" and shutil.which("osascript") is not None
 
 
@@ -91,24 +95,35 @@ async def notify(title: str, message: str, *, subtitle: str = "") -> bool:
         safe_message = _truncate(str(message or ""), _MESSAGE_MAX)
         safe_subtitle = _truncate(str(subtitle or ""), _SUBTITLE_MAX)
 
+        if host.is_linux():
+            # notify-send takes plain argv, so untrusted text is data here
+            # too. `--` ends option parsing: a title like "--help" stays text.
+            body = f"{safe_subtitle}\n{safe_message}" if safe_subtitle else safe_message
+            argv = ["notify-send", "--app-name=JARVIS", "--", safe_title, body]
+            stdin_pipe = None
+        else:
+            argv = ["osascript", "-", safe_title, safe_message, safe_subtitle]
+            stdin_pipe = asyncio.subprocess.PIPE
+
         try:
             proc = await asyncio.create_subprocess_exec(
-                "osascript", "-", safe_title, safe_message, safe_subtitle,
-                stdin=asyncio.subprocess.PIPE,
+                *argv,
+                stdin=stdin_pipe,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
         except OSError as e:
-            log.warning(f"notifier: failed to spawn osascript: {e}")
+            log.warning(f"notifier: failed to spawn {argv[0]}: {e}")
             return False
 
         try:
             _, stderr = await asyncio.wait_for(
-                proc.communicate(_NOTIFY_SCRIPT.encode("utf-8")),
+                proc.communicate(
+                    None if host.is_linux() else _NOTIFY_SCRIPT.encode("utf-8")),
                 timeout=_TIMEOUT_SECONDS,
             )
         except asyncio.TimeoutError:
-            log.warning("notifier: osascript timed out, killing it")
+            log.warning(f"notifier: {argv[0]} timed out, killing it")
             try:
                 proc.kill()
                 await proc.communicate()
@@ -118,7 +133,7 @@ async def notify(title: str, message: str, *, subtitle: str = "") -> bool:
 
         if proc.returncode != 0:
             log.warning(
-                f"notifier: osascript exited {proc.returncode}: "
+                f"notifier: {argv[0]} exited {proc.returncode}: "
                 f"{stderr.decode(errors='replace').strip()}"
             )
             return False
