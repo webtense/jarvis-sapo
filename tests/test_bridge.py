@@ -71,6 +71,23 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(server_module, "speech", fake)
     server_module.voice_clients.add(object())     # somebody is listening
 
+    # The remember handler spawns `_bridge_announced_when_spoken` as a real
+    # task on the TestClient's loop. Whether that task gets a turn before the
+    # request returns depends on the machine, and when it does, it arms the
+    # proposal with the fake's DEFAULT `played=True` before the test has set
+    # the scenario up (a cancelled announcement, a "sí" said mid-way). Tests
+    # drive that coroutine themselves through `announce()`, so the spawned
+    # copy is closed unrun.
+    real_spawn = server_module._spawn
+
+    def spawn(coro):
+        if getattr(getattr(coro, "cr_code", None), "co_name", "") == "_bridge_announced_when_spoken":
+            coro.close()
+            return None
+        return real_spawn(coro)
+
+    monkeypatch.setattr(server_module, "_spawn", spawn)
+
     posted = []
 
     async def fake_notify(title, message, *, subtitle=""):
