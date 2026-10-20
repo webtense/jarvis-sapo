@@ -17,7 +17,10 @@
 name: tests
 
 on:
+  # Una rama con PR abierto se prueba una vez (pull_request), no dos (push +
+  # pull_request): con macOS en cola cada ejecución duplicada cuesta minutos.
   push:
+    branches: [main]
   pull_request:
 
 jobs:
