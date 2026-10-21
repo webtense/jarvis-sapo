@@ -727,6 +727,9 @@ def test_other_rules_still_work_when_one_is_excluded(monkeypatch, tmp_path):
     _write_exclude(monkeypatch, tmp_path, {"entity_ids": ["alarm_control_panel.casa"]})
     w, clock = watcher()
     w.observe({"person.ana": R("not_home")})       # baseline
+    clock.tick(400)
+    w.observe({"person.ana": R("home")})           # debounce starts
+    clock.tick(400)
     alerts = w.observe({"person.ana": R("home")})
     assert len(alerts) == 1 and alerts[0].rule_id == "ana"
 
