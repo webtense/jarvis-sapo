@@ -3,6 +3,15 @@
 Fork de [ethanplusai/jarvis](https://github.com/ethanplusai/jarvis) (© 2026 Ethan Rogers) orientado a Ubuntu/Linux.
 Versionado semántico con prefijo `ubuntu-`. Uso personal y no comercial, igual que la licencia original.
 
+## ubuntu-0.8.0 — Google con escritura, pantalla de administración, voz y trato más naturales
+- **Google con escritura y confirmación** (`google_actions.py`, desactivado por defecto): crear y modificar eventos de Calendar, crear/modificar/completar tareas y crear o ampliar notas como documentos de Google Docs en la carpeta 'JARVIS Notas' (Keep no tiene API en cuentas personales). Sin borrar, sin enviar correo, sin invitados ni compartir. El cerebro solo propone (`google_propose`), JARVIS lo dice entero y solo ejecuta tras tu "sí" oído después de la pregunta; token de escritura aparte (`google_write.json`, `scripts/google-auth.py --write`), política en `data/jarvis/google-actions.json`, simulacro `JARVIS_GOOGLE_DRYRUN=1`, auditoría y límite por minuto. Ver `docs/google-escritura.md`.
+- **Pantalla de administración** `/admin.html`: Perfil, Voz, Escucha, Conexiones, Casa y Sistema, con un esquema cerrado de ajustes (nunca claves ni tokens; la lista blanca de la casa solo se edita a mano). Ver `docs/admin.md`.
+- **Botón MUTE grande** en la pantalla principal (atajo `M`); con el mute, el micrófono local deja de enviar audio al servidor.
+- **Casa**: opción `HA_ACTIONS_ALLOW_READ_TOKEN=1` para usar el token de lectura también en las acciones (decisión del usuario, no recomendada, con aviso en el arranque); filtro de exclusión de entidades del resort (`ha_exclude.py`).
+- **Trato por tu nombre** (`HONORIFIC=name`): el nombre solo sale al saludar; el resto, sin tratamiento y con un "Dígame." al cerrar. Piper con velocidad ajustable (`PIPER_LENGTH_SCALE`, más de 1 = más lenta).
+- **Google en solo lectura** (`google_readonly_mcp.py`, Calendar, Tasks, Gmail, Drive y Hojas), `docs/google.md`.
+- Conocido y pendiente: el panel no tiene pantalla para las propuestas de Google (solo la ruta `POST /api/google/<id>/confirm|reject`); el modal de primer uso tapa el botón MUTE; nada de esto está probado con la API real de Google ni con voz real; el resort (Odoo, gestión, cámaras) queda fuera por licencia; `server.py` sin partir.
+
 ## ubuntu-0.7.0 — palabra "Jarvis", voces, casa con confirmación, escritorio y E2E
 - **Palabra "Jarvis" sin modelo extra** (`JARVIS_WAKE_WORD=whisper`, `wake_text.py`): cada frase se transcribe y solo pasa al turno si empieza por "Jarvis" (variantes de transcripción y distancia de edición 1; se quita del texto), con una ventana de conversación (`JARVIS_WAKE_WINDOW_SEC`, 20 s). Coste: transcribe todo lo que oye. La opción `on` sigue siendo openWakeWord ("Hey Jarvis").
 - **Interrumpir hablando** (`JARVIS_BARGE_IN=on`, opt-in): si hablas encima, JARVIS se calla (como `hush`). Umbrales calibrados con eco simulado, no con el equipo real; la tecla Esc sigue siendo la vía fiable.
