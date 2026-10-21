@@ -41,27 +41,48 @@ FIREFOX_PREFS = {
 }
 
 
+# Se anota desde la propia página en vez de con page.on("websocket"): ese evento
+# de Playwright no llegó a ver los marcos en Firefox en la CI, y un script de
+# inicio que envuelve WebSocket funciona igual en los dos navegadores.
+TAP_SCRIPT = """
+(() => {
+  const seen = (window.__jarvisFrames = []);
+  const Native = window.WebSocket;
+  window.WebSocket = function (url, protocols) {
+    const ws = protocols === undefined ? new Native(url) : new Native(url, protocols);
+    const path = String(url).replace(/^wss?:\\/\\/[^/]+\\//, "");
+    ws.addEventListener("message", (event) => {
+      if (typeof event.data === "string") seen.push([path, event.data]);
+    });
+    return ws;
+  };
+  window.WebSocket.prototype = Native.prototype;
+  for (const k of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"]) window.WebSocket[k] = Native[k];
+})();
+"""
+
+
 class SocketTap:
     """Los textos JSON que el servidor envía por cada websocket de la página."""
 
     def __init__(self, page) -> None:
+        self.page = page
         self.frames: list[tuple[str, dict]] = []     # (ruta, mensaje)
-        page.on("websocket", self._on_socket)
 
-    def _on_socket(self, ws) -> None:
-        path = ws.url.split("/", 3)[-1]
+    async def install(self) -> None:
+        await self.page.add_init_script(TAP_SCRIPT)
 
-        def received(payload) -> None:
-            if isinstance(payload, bytes):
-                return
+    async def refresh(self) -> None:
+        raw = await self.page.evaluate("window.__jarvisFrames || []")
+        frames = []
+        for path, payload in raw:
             try:
                 msg = json.loads(payload)
             except (TypeError, ValueError):
-                return
+                continue
             if isinstance(msg, dict):
-                self.frames.append((path, msg))
-
-        ws.on("framereceived", received)
+                frames.append((path, msg))
+        self.frames = frames
 
     def mic(self, kind: str) -> list[dict]:
         return [m for p, m in self.frames if p == "ws/mic" and m.get("type") == kind]
@@ -70,9 +91,12 @@ class SocketTap:
         return [m.get("state") for m in self.mic("state")]
 
 
-async def wait_for(predicate, what: str, timeout: float = WAIT_SEC) -> None:
+async def wait_for(predicate, what: str, tap: "SocketTap | None" = None,
+                   timeout: float = WAIT_SEC) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if tap is not None:
+            await tap.refresh()
         if predicate():
             return
         await asyncio.sleep(0.2)
@@ -96,19 +120,20 @@ async def test_chromium_streams_the_fake_microphone_to_a_turn(start_jarvis):
             context = await browser.new_context(permissions=["microphone"])
             page = await context.new_page()
             tap = SocketTap(page)
+            await tap.install()
             await page.goto(jarvis.base + "/")
 
-            await wait_for(lambda: tap.mic("ready"), "the server's 'ready' on /ws/mic")
+            await wait_for(lambda: tap.mic("ready"), "the server's 'ready' on /ws/mic", tap)
             ready = tap.mic("ready")[0]
             assert ready["sampleRate"] == 16000
 
-            await wait_for(lambda: tap.mic("transcript"), "a 'transcript' frame")
+            await wait_for(lambda: tap.mic("transcript"), "a 'transcript' frame", tap)
             assert tap.mic("transcript")[0]["text"] == FIXED_TEXT
 
             # La máquina de estados pasó por las tres fases, en orden.
             await wait_for(lambda: is_subsequence(
                 ["recording", "transcribing", "listening"], tap.mic_states()),
-                "recording -> transcribing -> listening")
+                "recording -> transcribing -> listening", tap)
 
             # Y el texto llegó a ser un turno (`_handle_utterance`).
             await wait_for(lambda: jarvis.events("turn"), "a turn")
@@ -139,6 +164,7 @@ async def test_firefox_in_auto_mode_picks_the_local_microphone(start_jarvis):
         try:
             page = await browser.new_page()
             tap = SocketTap(page)
+            await tap.install()
             await page.goto(jarvis.base + "/")
 
             has_recogniser = await page.evaluate(
@@ -147,8 +173,8 @@ async def test_firefox_in_auto_mode_picks_the_local_microphone(start_jarvis):
 
             await wait_for(lambda: any(p == "ws/voice" and m.get("stt") == "auto"
                                        for p, m in tap.frames),
-                           "the config frame announcing stt=auto")
-            await wait_for(lambda: tap.mic("ready"), "'ready' on /ws/mic")
+                           "the config frame announcing stt=auto", tap)
+            await wait_for(lambda: tap.mic("ready"), "'ready' on /ws/mic", tap)
         finally:
             await browser.close()
 
@@ -167,14 +193,14 @@ async def test_the_page_is_in_spanish_when_the_server_is(start_jarvis):
 
             await page.click("#btn-menu")
             await page.wait_for_selector("#btn-settings", state="visible", timeout=5000)
-            assert (await page.inner_text("#btn-settings")).strip() == "Ajustes"
-            assert (await page.inner_text("#btn-restart")).strip() == "Reiniciar el servidor"
+            assert (await page.text_content("#btn-settings")).strip() == "Ajustes"
+            assert (await page.text_content("#btn-restart")).strip() == "Reiniciar el servidor"
 
             await page.click("#btn-settings")
             heading = page.locator("#settings-panel-inner h2")
             await heading.wait_for(state="visible", timeout=5000)
-            assert (await heading.inner_text()).strip() == "Ajustes"
-            sections = await page.locator("#settings-panel-inner h3").all_inner_texts()
+            assert (await heading.text_content()).strip() == "Ajustes"
+            sections = await page.locator("#settings-panel-inner h3").all_text_contents()
             assert "Claves de API" in sections
             assert "Estado de la conexión" in sections
             assert "Preferencias del usuario" in sections
