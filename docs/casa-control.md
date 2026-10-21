@@ -90,6 +90,40 @@ Dilo claro, porque es lo más importante:
 Si usas `http://` en una red local, el token viaja sin cifrar por esa red. Prefiere `https://`
 o Tailscale.
 
+## Usar el token de lectura para las acciones (decisión del usuario)
+
+**No es lo recomendado.** Por defecto JARVIS exige un token de acciones distinto del de
+lectura y se niega a enviar nada si ambos ficheros guardan el mismo valor. Si decides, con
+conocimiento del riesgo, usar el token que ya tienes también para actuar, es un opt-in
+explícito:
+
+```
+HA_ACTIONS_ALLOW_READ_TOKEN=1        # solo vale exactamente "1"; cualquier otro valor no activa nada
+```
+
+- Con la variable y **sin** `HA_ACTIONS_TOKEN_FILE`, las acciones usan el fichero de
+  `HA_TOKEN_FILE`.
+- Con la variable y `HA_ACTIONS_TOKEN_FILE` apuntando a un fichero con el mismo token (o al
+  mismo fichero), JARVIS lo acepta en lugar de rechazarlo.
+- Sin la variable nada cambia: se rechaza el mismo token y no hay respaldo.
+- Siguen exigiéndose todas las comprobaciones del fichero (permisos `600`, fichero regular,
+  sin redirecciones, sin proxy). `claude_env` quita la variable de los *runs* y del cerebro.
+
+**Por qué no es lo recomendado.** Un token con permisos de escritura de un usuario
+administrador que se filtre equivale a control total de Home Assistant, incluidos los
+dominios que JARVIS prohíbe (alarma, cerraduras, cámaras, scripts, automatizaciones...). La
+lista blanca la aplica JARVIS, no Home Assistant: quien tenga el token puede saltársela
+llamando a Home Assistant directamente.
+
+**Qué sigue protegiendo JARVIS** aunque el token sea el mismo: la confirmación hablada
+(con las reglas de `bridge.py`), la lista blanca y los dominios prohibidos, el filtro del
+resort (`ha-exclude.json`), el límite de acciones por minuto y la auditoría en
+`home-actions.log`.
+
+**Se ve siempre.** Mientras esté activo, el preflight y el log de arranque avisan de que las
+acciones usan el token de lectura por decisión del usuario. El aviso no incluye rutas ni
+valores. Para volver a lo seguro, crea el token aparte (sección anterior) y quita la variable.
+
 ## La lista blanca: `data/jarvis/home-actions.json`
 
 Es tu fichero. JARVIS no lo crea ni lo edita. Hay un ejemplo inactivo en

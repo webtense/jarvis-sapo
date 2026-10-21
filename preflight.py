@@ -574,6 +574,31 @@ def _check_anthropic_key_leftover_sync() -> Check:
     )
 
 
+HOME_READ_TOKEN_NOTICE = ("Home actions use the READ token, by the user's decision "
+                          "(HA_ACTIONS_ALLOW_READ_TOKEN=1).")
+
+
+def _check_home_actions_read_token_sync() -> Check:
+    """Say, plainly and once per start, when house actions use the read token.
+
+    Opt-in by the user (docs/casa-control.md); never silent. The text names
+    neither a path nor a value, and the check only reads to compare."""
+    import home_actions
+    if not home_actions.read_token_in_use():
+        return Check(
+            name="home_actions_read_token",
+            status=STATUS_OK,
+            message="Home actions do not use the read token.",
+        )
+    return Check(
+        name="home_actions_read_token",
+        status=STATUS_WARN,
+        message=HOME_READ_TOKEN_NOTICE,
+        remedy=("Not recommended: a leaked write-capable token is full control of Home "
+                "Assistant. Create a separate token and drop HA_ACTIONS_ALLOW_READ_TOKEN."),
+    )
+
+
 def _settings_path() -> Path:
     """Where the CLI's user settings.json lives.
 
@@ -721,7 +746,8 @@ def enable_cross_session_inbound() -> tuple[bool, str]:
 _ASYNC_CHECKS = (_check_claude_cli, _check_claude_login, _check_accessibility)
 _SYNC_CHECKS = (_check_fish_api_key_sync, _check_anthropic_key_leftover_sync,
                 _check_cross_session_inbound_sync, _check_screen_recording_sync,
-                _check_linux_tools_sync, _check_local_stt_sync)
+                _check_linux_tools_sync, _check_local_stt_sync,
+                _check_home_actions_read_token_sync)
 
 
 async def _run_one(fn, *, is_async: bool, timeout: float) -> Check:
@@ -796,6 +822,8 @@ def _phrase_for(check: Check) -> str:
         return "there's a leftover Anthropic API key in the environment"
     if name == "cross_session_inbound":
         return "cross-session steering isn't enabled"
+    if name == "home_actions_read_token":
+        return "house actions use the read token, by your decision"
     return check.message
 
 
