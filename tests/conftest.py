@@ -29,9 +29,10 @@ def _no_local_voice_unless_asked(monkeypatch, request):
     """A developer with Piper installed must still get the same results from
     the upstream suite, which assumes Fish is the only voice. Tests of the
     local voice opt in with the `local_voice` fixture."""
+    import tts
+    monkeypatch.setattr(tts, "_fish_down_until", 0.0)      # no test inherits a Fish outage
     if request.module.__name__.endswith("test_local_voice"):
         return
-    import tts
     monkeypatch.setattr(tts, "local_available", lambda: False)
 
 

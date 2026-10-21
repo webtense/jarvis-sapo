@@ -619,10 +619,16 @@ async def _voice_emit(msg: dict) -> None:
 
 
 async def _synth_for_speech(text: str) -> Optional[bytes]:
-    if tts.provider() == "piper":
+    chosen = tts.provider()
+    if chosen == "piper":
         r = await tts.synthesize_local(text)
-    elif tts.provider() == "fish":
+    elif chosen == "fish":
         r = await tts.synthesize_chunk(text, api_key=FISH_API_KEY, voice_id=FISH_VOICE_ID, client=_tts_client)
+        if (r is None and tts.local_available()
+                and os.environ.get("JARVIS_TTS_PROVIDER", "auto").strip().lower() == "auto"):
+            # Fish just failed (tts.note_fish_failure has moved later sentences
+            # to Piper): say THIS one with the local voice instead of dropping it.
+            r = await tts.synthesize_local(text)
     else:
         return None
     if r is None:

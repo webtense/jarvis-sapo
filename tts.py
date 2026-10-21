@@ -66,6 +66,7 @@ async def synthesize_chunk(text: str, *, api_key: str, voice_id: str,
         ) as resp:
             if resp.status_code != 200:
                 log.error(f"TTS {resp.status_code} for {text[:40]!r}")
+                note_fish_failure(resp.status_code)
                 return None
             async for part in resp.aiter_bytes():
                 if first is None:
@@ -73,6 +74,7 @@ async def synthesize_chunk(text: str, *, api_key: str, voice_id: str,
                 buf.extend(part)
     except (httpx.HTTPError, OSError) as e:
         log.error(f"TTS error: {e}")
+        note_fish_failure(None)
         return None
     finally:
         if own:
@@ -82,6 +84,7 @@ async def synthesize_chunk(text: str, *, api_key: str, voice_id: str,
                 log.debug(f"TTS client close failed: {e}")
     if not buf:
         return None
+    _clear_fish_failure()
     return SynthResult(bytes(buf), first if first is not None else 0.0, time.monotonic() - t0)
 
 
@@ -114,6 +117,38 @@ def local_available() -> bool:
     return piper_model_path().is_file()
 
 
+# Fish can be configured and still unusable: a key without credit answers
+# `402 Payment Required` to every sentence, and JARVIS used to go mute because a
+# configured key outranked the local voice. A failure now moves `auto` to Piper
+# for a while (when Piper is there), and the next attempt on Fish comes after.
+_ACCOUNT_STATUSES = (401, 402, 403)
+FISH_DOWN_ACCOUNT_SEC = 600.0      # the account will not fix itself in a minute
+FISH_DOWN_TRANSIENT_SEC = 60.0     # a network blip might
+_fish_down_until = 0.0
+
+
+def note_fish_failure(status: Optional[int] = None) -> None:
+    """Remember that Fish just failed. `status` is the HTTP status, if any."""
+    global _fish_down_until
+    window = FISH_DOWN_ACCOUNT_SEC if status in _ACCOUNT_STATUSES else FISH_DOWN_TRANSIENT_SEC
+    now = time.monotonic()
+    if now >= _fish_down_until and local_available():
+        log.warning(
+            f"Fish Audio failed ({status or 'network error'}"
+            f"{': the key is rejected or the account has no credit' if status in _ACCOUNT_STATUSES else ''}); "
+            f"speaking with the local Piper voice for {int(window)} s")
+    _fish_down_until = max(_fish_down_until, now + window)
+
+
+def fish_is_down() -> bool:
+    return time.monotonic() < _fish_down_until
+
+
+def _clear_fish_failure() -> None:
+    global _fish_down_until
+    _fish_down_until = 0.0
+
+
 def provider() -> str:
     """`fish`, `piper` or `none`. Never raises."""
     wanted = os.environ.get("JARVIS_TTS_PROVIDER", "auto").strip().lower()
@@ -124,6 +159,8 @@ def provider() -> str:
     if wanted == "none":
         return "none"
     if fish_configured():
+        if fish_is_down() and local_available():
+            return "piper"
         return "fish"
     return "piper" if local_available() else "none"
 
