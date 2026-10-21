@@ -246,7 +246,7 @@ def test_protocol_basics():
 EXAMPLES = sorted((REPO / "jarvis_home" / "connections.examples").glob("*.json"))
 # Not MCP connections: the allow-list of home actions and the alert rules
 # (docs/casa-control.md). They have their own tests and are inactive too.
-_NOT_SERVERS = {"home-actions.json", "home-alerts.json"}
+_NOT_SERVERS = {"home-actions.json", "home-alerts.json", "ha-exclude.json"}
 SERVER_EXAMPLES = [p for p in EXAMPLES if p.name not in _NOT_SERVERS]
 
 
@@ -397,3 +397,82 @@ def test_the_ha_example_uses_a_token_file_not_a_token():
     env = body["mcpServers"]["casa"]["env"]
     assert "HA_TOKEN" not in env and env["HA_TOKEN_FILE"].startswith("/")
     assert env["HA_URL"].startswith("<")
+
+
+# --- the resort exclusion filter (ha_exclude.py) -------------------------------
+
+EXCLUDED_STATES = STATES + [
+    {"entity_id": "light.habitacion_101", "state": "on",
+     "attributes": {"friendly_name": "Hab 101"}},
+]
+
+
+@pytest.fixture
+def excluded(net, monkeypatch, tmp_path):
+    """Same fake network as `net`, plus an active ha-exclude.json."""
+    net.routes["/api/states"] = EXCLUDED_STATES
+    data_dir = tmp_path / "jarvis-data"
+    monkeypatch.setenv("JARVIS_DATA_DIR", str(data_dir))
+    import data_paths
+    path = data_paths.ha_exclude_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"entity_ids": ["light.habitacion_101"]}))
+    path.chmod(0o600)
+    return net
+
+
+def test_list_entities_omits_the_excluded_and_does_not_count_it(excluded):
+    err, text = _call("ha_list_entities", domain="light")
+    assert not err
+    assert "habitacion_101" not in text
+    assert "light.salon" in text
+
+
+def test_get_state_on_an_excluded_entity_says_not_found_without_a_network_call(excluded):
+    err, text = _call("ha_get_state", entity_id="light.habitacion_101")
+    assert err
+    assert "no entity" in text.lower()
+    assert excluded.calls == []            # refused before any request was made
+
+
+def test_get_history_on_an_excluded_entity_makes_no_request(excluded):
+    err, text = _call("ha_get_history", entity_id="light.habitacion_101", hours=2)
+    assert err
+    assert excluded.calls == []
+
+
+def test_home_summary_never_lists_an_excluded_entity(excluded):
+    err, text = _call("ha_home_summary")
+    assert not err
+    assert "habitacion_101" not in text
+
+
+def test_a_non_excluded_entity_still_works_normally(excluded):
+    err, text = _call("ha_get_state", entity_id="light.salon")
+    assert not err and "light.salon" in text
+
+
+def test_with_no_exclude_file_behaviour_is_unchanged(net):
+    """No HA_EXCLUDE_FILE and no file at the default path: identical to a
+    version of this server with no exclusion filter at all."""
+    err, text = _call("ha_list_entities")
+    assert not err and "light.salon" in text
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_a_broken_exclude_file_hides_everything_fail_closed(net, monkeypatch, tmp_path):
+    data_dir = tmp_path / "jarvis-data2"
+    monkeypatch.setenv("JARVIS_DATA_DIR", str(data_dir))
+    import data_paths
+    path = data_paths.ha_exclude_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"entity_ids": ["light.salon"]}))
+    path.chmod(0o644)                      # readable by group/others: untrusted
+    err, text = _call("ha_list_entities")
+    assert err
+    assert "not valid" in text.lower()
+    assert net.calls == []
+    err, text = _call("ha_get_state", entity_id="light.salon")
+    assert err and net.calls == []
+    err, text = _call("ha_home_summary")
+    assert err and net.calls == []

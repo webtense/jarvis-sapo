@@ -55,6 +55,7 @@ from typing import Optional
 
 import bridge
 import data_paths
+import ha_exclude
 import i18n
 import lang
 
@@ -163,6 +164,17 @@ class Policy:
         """The validated Action, or `Refused`. Sends nothing."""
         entity = _entity(entity_id)
         svc = _service(service)
+        # Defence in depth: even an entity the user's own home-actions.json
+        # lists is refused if it is also in the resort's exclusion file. No
+        # network call has happened yet. If the exclusion file itself cannot
+        # be trusted, every action is refused the same way (fail closed) --
+        # see ha_exclude.load.
+        try:
+            excluded = ha_exclude.load().is_excluded(entity)
+        except ha_exclude.ExcludeFileInvalid:
+            raise Refused("the exclusion file is not valid; refusing.") from None
+        if excluded:
+            raise Refused("excluded")
         domain = entity.split(".", 1)[0]
         if domain in FORBIDDEN_DOMAINS:
             raise Refused(f"The domain {domain} is never controlled by JARVIS.")

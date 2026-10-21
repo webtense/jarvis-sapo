@@ -48,6 +48,7 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Optional
 
 import data_paths
+import ha_exclude
 import ha_readonly_mcp
 
 log = logging.getLogger("jarvis.ha_watch")
@@ -166,6 +167,13 @@ def parse_config(data) -> Config:
         raise ConfigError("home-alerts.json has no rules.")
     if len(raw_rules) > MAX_RULES:
         raise ConfigError(f"At most {MAX_RULES} rules.")
+    try:
+        excl = ha_exclude.load()
+    except ha_exclude.ExcludeFileInvalid:
+        # Fail closed: if the resort filter cannot be trusted, nobody can say
+        # which rules would have pointed at an excluded entity, so no alert
+        # at all is the safe answer rather than a guess.
+        raise ConfigError("the exclusion file is not valid; home alerts stay off.") from None
     rules, ids = [], set()
     for raw in raw_rules:
         if not isinstance(raw, dict):
@@ -184,6 +192,9 @@ def parse_config(data) -> Config:
                 or entity.split(".", 1)[0] not in spec["domains"]):
             raise ConfigError(f"Rule {rid}: the entity must be a "
                               f"{'/'.join(sorted(spec['domains']))}.")
+        if excl.is_excluded(entity):
+            log.warning("ha_watch: rule %s points at an excluded entity; ignored.", rid)
+            continue
         fallback = entity.split(".", 1)[1].replace("_", " ")
         debounce = _num(raw.get("debounce_s", spec["debounce"]), 0, 3600, f"{rid}.debounce_s")
         every = _num(raw.get("min_interval_s", spec["interval"]), 30, 86400,

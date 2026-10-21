@@ -690,3 +690,59 @@ async def test_the_loop_keeps_going_through_failures_and_stops_when_cancelled(ca
     assert len([r for r in warnings if "could not be read" in r.getMessage()]) == 1   # not per poll
     assert any("is back" in r.getMessage() for r in caplog.records)
     assert READ_TOKEN not in caplog.text
+
+
+# --- the resort exclusion filter (ha_exclude.py) -------------------------------
+
+def _write_exclude(monkeypatch, tmp_path, data, mode=0o600):
+    import data_paths
+    monkeypatch.setenv("JARVIS_DATA_DIR", str(tmp_path / "data"))
+    path = data_paths.ha_exclude_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data))
+    path.chmod(mode)
+    return path
+
+
+def test_a_rule_pointing_at_an_excluded_entity_is_dropped_with_one_log_line(
+        monkeypatch, tmp_path, caplog):
+    _write_exclude(monkeypatch, tmp_path, {"entity_ids": ["alarm_control_panel.casa"]})
+    with caplog.at_level("WARNING", logger="jarvis.ha_watch"):
+        cfg = config()
+    assert "alarma" not in [r.id for r in cfg.rules]
+    assert len(cfg.rules) == len(RULES) - 1
+    warnings = [r for r in caplog.records if "excluded" in r.getMessage()]
+    assert len(warnings) == 1
+
+
+def test_an_excluded_rule_never_speaks(monkeypatch, tmp_path):
+    _write_exclude(monkeypatch, tmp_path, {"entity_ids": ["alarm_control_panel.casa"]})
+    cfg = config()
+    w = hw.Watcher(cfg, Clock())
+    alerts = w.observe({"alarm_control_panel.casa": R("triggered")})
+    assert alerts == []             # there is no such rule left to fire
+
+
+def test_other_rules_still_work_when_one_is_excluded(monkeypatch, tmp_path):
+    _write_exclude(monkeypatch, tmp_path, {"entity_ids": ["alarm_control_panel.casa"]})
+    w, clock = watcher()
+    w.observe({"person.ana": R("not_home")})       # baseline
+    clock.tick(400)
+    w.observe({"person.ana": R("home")})           # debounce starts
+    clock.tick(400)
+    alerts = w.observe({"person.ana": R("home")})
+    assert len(alerts) == 1 and alerts[0].rule_id == "ana"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_a_broken_exclude_file_turns_off_all_alerts(monkeypatch, tmp_path):
+    _write_exclude(monkeypatch, tmp_path, {"entity_ids": ["alarm_control_panel.casa"]},
+                  mode=0o644)
+    with pytest.raises(hw.ConfigError):
+        config()
+
+
+def test_with_no_exclude_file_every_rule_is_kept(monkeypatch, tmp_path):
+    monkeypatch.setenv("JARVIS_DATA_DIR", str(tmp_path / "data"))
+    cfg = config()
+    assert len(cfg.rules) == len(RULES)

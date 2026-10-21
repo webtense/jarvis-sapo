@@ -110,6 +110,15 @@ def home_alerts_path() -> Path:
     return brain_home() / "home-alerts.json"
 
 
+def ha_exclude_path() -> Path:
+    """The user's Home Assistant exclusion list (see `ha_exclude.py`).
+
+    His own file, never created or edited by JARVIS. `HA_EXCLUDE_FILE`
+    overrides this default; this path is only consulted when that variable
+    is unset, and only if the file actually exists here."""
+    return brain_home() / "ha-exclude.json"
+
+
 def connections_seed_path() -> Path:
     """What JARVIS last wrote into `connections_path`, as a hash. See
     `persona_seed_path` — same record, same reasons."""

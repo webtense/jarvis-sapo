@@ -834,3 +834,63 @@ def test_the_example_is_valid_inactive_and_holds_no_secret_or_address():
     pol = ha._parse_policy(body)
     assert pol.entities and not [p for p in pol.problems if "forbidden" in p]
     assert not set(body["services"]) & ha.FORBIDDEN_DOMAINS
+
+
+# --- the resort exclusion filter (ha_exclude.py), defence in depth ------------
+
+def _write_exclude(house, data, mode=0o600):
+    path = ha.data_paths.ha_exclude_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data))
+    path.chmod(mode)
+    return path
+
+
+def test_an_excluded_entity_is_refused_even_if_whitelisted(house):
+    pol = policy(house)
+    _write_exclude(house, {"entity_ids": ["light.salon"]})
+    with pytest.raises(ha.Refused):
+        pol.check("light.salon", "turn_on")
+    assert house.calls == []                     # no network call was ever made
+
+
+def test_a_non_excluded_entity_still_works(house):
+    pol = policy(house)
+    _write_exclude(house, {"entity_ids": ["light.salon"]})
+    action = pol.check("switch.cafetera", "turn_on")
+    assert action.entity_id == "switch.cafetera"
+
+
+def test_the_audit_line_says_excluded_not_a_generic_refusal(house):
+    pol = policy(house)
+    _write_exclude(house, {"entity_ids": ["light.salon"]})
+    try:
+        pol.check("light.salon", "turn_on")
+    except ha.Refused as e:
+        assert str(e) == "excluded"
+    else:
+        pytest.fail("expected Refused")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_a_broken_exclude_file_refuses_every_action(house):
+    pol = policy(house)
+    _write_exclude(house, {"entity_ids": ["light.salon"]}, mode=0o644)
+    with pytest.raises(ha.Refused):
+        pol.check("switch.cafetera", "turn_on")
+    assert house.calls == []
+
+
+def test_with_no_exclude_file_nothing_is_refused_by_it(house):
+    pol = policy(house)
+    action = pol.check("light.salon", "turn_on")
+    assert action.entity_id == "light.salon"
+
+
+def test_a_domain_wide_exclusion_blocks_every_entity_in_it(house):
+    pol = policy(house)
+    _write_exclude(house, {"domains": ["light"]})
+    with pytest.raises(ha.Refused):
+        pol.check("light.salon", "turn_on")
+    # a different domain is unaffected
+    pol.check("switch.cafetera", "turn_on")

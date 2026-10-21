@@ -118,6 +118,52 @@ No se ha podido comprobar que la versión de Claude Code que usa JARVIS expanda
 `${VARIABLE}` dentro de `headers`. Si no lo hace, usa un puente stdio (por
 ejemplo `mcp-remote`) que lea usuario y clave del entorno.
 
+## Separar lo que no es tuyo
+
+Si tu Home Assistant mezcla entidades que no son tuyas — por ejemplo las de un
+trabajo, un edificio compartido o cualquier sistema que no deba controlarse
+desde un asistente personal — puedes excluirlas de raíz, sin depender de la
+educación del modelo: `ha_exclude.py`, usado por `ha_readonly_mcp.py`,
+`ha_watch.py` y `home_actions.py` por igual.
+
+El fichero (el tuyo, JARVIS no lo crea ni lo edita) va en
+`data/jarvis/ha-exclude.json`, o en la ruta que indique `HA_EXCLUDE_FILE`
+(variable de entorno del servidor `casa` en `connections.json`, y del propio
+proceso de JARVIS para `ha_watch.py` y `home_actions.py`). Ejemplo inactivo en
+`jarvis_home/connections.examples/ha-exclude.json`. Formato:
+
+```json
+{
+  "entity_ids": ["light.habitacion_101"],
+  "patterns": ["sensor\\.hab_[0-9]+_.*"],
+  "domains": ["climate"]
+}
+```
+
+- `entity_ids`: coincidencia EXACTA, en minúsculas, tal cual. Nada se
+  normaliza para que un identificador cuele ni para que deje de coincidir.
+- `patterns`: expresiones regulares comparadas con `re.fullmatch` (nunca
+  `match` ni `search`), de longitud limitada y descartadas si parecen
+  patológicas, para que un patrón mal escrito no pueda colgar el proceso.
+- `domains`: dominios completos (`climate`, no `climate.algo`).
+
+Las tres claves son opcionales. Sin `HA_EXCLUDE_FILE` y sin ese fichero en
+`data/jarvis/`, el comportamiento es EXACTAMENTE el de siempre: no se excluye
+nada.
+
+**Fallo cerrado**: si `HA_EXCLUDE_FILE` está definido, o el fichero por
+defecto existe, pero no se puede leer, no es JSON válido o tiene permisos de
+grupo u otros, ninguna de las tres piezas muestra ni toca nada — las
+herramientas de lectura dicen con claridad que el fichero de exclusión no es
+válido y no enseñan nada, `ha_watch` no da ningún aviso y `home_actions`
+rechaza cualquier acción, hasta que el fichero sea válido de nuevo.
+
+**Esto no sustituye separar bien las cuentas.** Es un filtro dentro de JARVIS,
+no una propiedad de Home Assistant ni del token: si ese mismo token de lectura
+se usa fuera de JARVIS (otra integración, otro cliente, `curl` a mano), ve
+exactamente lo mismo que sin este fichero. La separación real sigue siendo un
+usuario de Home Assistant con permisos limitados, o dos instancias distintas.
+
 ## Comprobaciones
 
 - Las herramientas de Home Assistant dicen claramente cuando falta
