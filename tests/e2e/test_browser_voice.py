@@ -68,6 +68,10 @@ class SocketTap:
     def __init__(self, page) -> None:
         self.page = page
         self.frames: list[tuple[str, dict]] = []     # (ruta, mensaje)
+        self.problems: list[str] = []                # consola y errores de la página
+        page.on("pageerror", lambda e: self.problems.append(f"pageerror: {e}"))
+        page.on("console", lambda m: self.problems.append(f"console.{m.type}: {m.text}")
+                if m.type in ("error", "warning") else None)
 
     async def install(self) -> None:
         await self.page.add_init_script(TAP_SCRIPT)
@@ -100,7 +104,10 @@ async def wait_for(predicate, what: str, tap: "SocketTap | None" = None,
         if predicate():
             return
         await asyncio.sleep(0.2)
-    raise AssertionError(f"timed out after {timeout:.0f}s waiting for {what}")
+    seen = "" if tap is None else (
+        f"\nframes: {[(p, m.get('type')) for p, m in tap.frames]}"
+        f"\npage problems: {tap.problems[-15:]}")
+    raise AssertionError(f"timed out after {timeout:.0f}s waiting for {what}{seen}")
 
 
 def is_subsequence(wanted: list[str], seen: list[str]) -> bool:
