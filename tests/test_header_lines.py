@@ -531,7 +531,8 @@ EXEMPT = {
         "the same: sender, subject and snippet of other people's mail, cleaned, "
         "truncated and marked untrusted; never rendered as an instruction"),
     "google_readonly_mcp.drive_search": (
-        "the same: Drive file names, cleaned and marked untrusted"),
+        "the same: Drive file names and their text, cleaned, truncated and "
+        "marked untrusted; never rendered as an instruction"),
     "google_readonly_mcp.handle": (
         "`id` is the JSON-RPC message id off the stdio channel, echoed in the "
         "response envelope, never rendered into prose"),
