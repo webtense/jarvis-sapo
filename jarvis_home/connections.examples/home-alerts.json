@@ -3,6 +3,7 @@
   "enabled": false,
   "interval_s": 30,
   "max_per_hour": 6,
+  "alarm_max_per_hour": 10,
   "rules": [
     {"id": "alarma", "type": "alarm_triggered", "entity": "alarm_control_panel.casa"},
     {"id": "llega_ana", "type": "person", "entity": "person.ana", "name": "Ana",

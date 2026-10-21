@@ -20,7 +20,11 @@ Quiet by construction:
   * Debounce: a condition has to hold for `debounce_s` before it counts (a
     phone's GPS flapping at the edge of the house is not three arrivals).
   * `min_interval_s` per rule and event, and `max_per_hour` for the whole
-    watcher (the alarm is exempt from the latter, never from the former).
+    watcher — except `alarm_triggered` rules, which are never silenced by
+    `max_per_hour` (an alarm genuinely going off is worth repeating) but
+    have their own cap, `alarm_max_per_hour` (10 by default): a rule that
+    flaps between `triggered` and `disarmed` can still speak URGENT every
+    `min_interval_s`, so without this cap it could do so without limit.
   * `unavailable` / `unknown` / a failed poll are "no information", never a
     change: Home Assistant restarting does not make everybody "leave".
 
@@ -55,6 +59,13 @@ MIN_INTERVAL_S = 10
 MAX_INTERVAL_S = 3600
 DEFAULT_MAX_PER_HOUR = 6
 MAX_MAX_PER_HOUR = 30
+# The alarm is exempt from `max_per_hour` (an alarm genuinely going off is
+# worth repeating), but not from every cap: a rule that flaps between
+# `triggered` and `disarmed` could otherwise speak URGENT every
+# `min_interval_s` (30 s minimum) forever. This is that cap, counted only
+# for alarm_triggered rules.
+DEFAULT_ALARM_MAX_PER_HOUR = 10
+MAX_ALARM_MAX_PER_HOUR = 60
 
 _ID_RE = re.compile(r"[a-z0-9_]{1,30}")
 _ENTITY_RE = re.compile(r"[a-z][a-z0-9_]{0,40}\.[a-z0-9_]{1,80}")
@@ -100,6 +111,7 @@ class Config:
     interval_s: float
     max_per_hour: int
     rules: tuple
+    alarm_max_per_hour: int = DEFAULT_ALARM_MAX_PER_HOUR
 
     @property
     def entities(self) -> list[str]:
@@ -147,6 +159,8 @@ def parse_config(data) -> Config:
                     MAX_INTERVAL_S, "interval_s")
     per_hour = int(_num(data.get("max_per_hour", DEFAULT_MAX_PER_HOUR), 1,
                         MAX_MAX_PER_HOUR, "max_per_hour"))
+    alarm_per_hour = int(_num(data.get("alarm_max_per_hour", DEFAULT_ALARM_MAX_PER_HOUR),
+                              1, MAX_ALARM_MAX_PER_HOUR, "alarm_max_per_hour"))
     raw_rules = data.get("rules")
     if not isinstance(raw_rules, list) or not raw_rules:
         raise ConfigError("home-alerts.json has no rules.")
@@ -187,7 +201,7 @@ def parse_config(data) -> Config:
             above = _num(raw.get("above_w"), 1, 1_000_000, f"{rid}.above_w")
         rules.append(Rule(rid, kind, entity, _clean_name(raw.get("name"), fallback),
                           debounce, every, events, minutes, above))
-    return Config(interval, per_hour, tuple(rules))
+    return Config(interval, per_hour, tuple(rules), alarm_per_hour)
 
 
 def load_config(path=None) -> Config:
@@ -238,6 +252,7 @@ class Watcher:
         self._clock = clock
         self._states = {r.id: _State() for r in config.rules}
         self._fired: deque[float] = deque()             # for max_per_hour
+        self._fired_alarm: deque[float] = deque()        # for alarm_max_per_hour
         self._latched_power: dict[str, bool] = {}
 
     # -- one rule's condition: True / False / None (no information) ----------
@@ -268,6 +283,8 @@ class Watcher:
         now = self._clock()
         while self._fired and now - self._fired[0] >= 3600:
             self._fired.popleft()
+        while self._fired_alarm and now - self._fired_alarm[0] >= 3600:
+            self._fired_alarm.popleft()
         out: list[Alert] = []
         for rule in self.config.rules:
             st = self._states[rule.id]
@@ -299,11 +316,18 @@ class Watcher:
             if now - st.last_fire.get(event, -1e12) < rule.min_interval_s:
                 continue
             urgent = rule.type == "alarm_triggered"
-            if not urgent and len(self._fired) >= self.config.max_per_hour:
+            if urgent:
+                if len(self._fired_alarm) >= self.config.alarm_max_per_hour:
+                    log.warning("ha_watch: alarm hourly limit reached (%d); "
+                               "dropping %s", self.config.alarm_max_per_hour, rule.id)
+                    continue
+            elif len(self._fired) >= self.config.max_per_hour:
                 log.info("ha_watch: hourly limit reached; dropping %s", rule.id)
                 continue
             st.last_fire[event] = now
-            if not urgent:
+            if urgent:
+                self._fired_alarm.append(now)
+            else:
                 self._fired.append(now)
             out.append(Alert(rule.id, self._text(rule, event, readings.get(rule.entity)), urgent))
         return out

@@ -213,6 +213,47 @@ def test_the_alarm_is_exempt_from_the_hourly_cap_and_others_are_not():
     assert sum(not a.urgent for a in w.observe(readings)) == 2     # a new hour
 
 
+def test_the_alarm_has_its_own_hourly_cap(caplog):
+    """Finding #4 of the security audit: an alarm rule that flaps between
+    triggered and disarmed must not speak URGENT without limit just because
+    it is exempt from `max_per_hour`."""
+    w, clock = watcher(only("alarma"), alarm_max_per_hour=2)
+    fired = 0
+    for _ in range(5):
+        fired += len(w.observe({"alarm_control_panel.casa": R("triggered")}))
+        clock.tick(31)                      # past min_interval_s (30 s minimum)
+        fired += len(w.observe({"alarm_control_panel.casa": R("armed_away")}))
+        clock.tick(31)
+    assert fired == 2
+    assert "alarm hourly limit reached" in caplog.text
+
+
+def test_the_alarm_hourly_cap_defaults_to_ten_and_resets_after_an_hour():
+    cfg = config(only("alarma"))
+    assert cfg.alarm_max_per_hour == hw.DEFAULT_ALARM_MAX_PER_HOUR == 10
+    w, clock = watcher(only("alarma"), alarm_max_per_hour=1)
+    assert len(w.observe({"alarm_control_panel.casa": R("triggered")})) == 1
+    clock.tick(31)
+    assert len(w.observe({"alarm_control_panel.casa": R("armed_away")})) == 0
+    clock.tick(31)
+    assert len(w.observe({"alarm_control_panel.casa": R("triggered")})) == 0  # capped
+    clock.tick(3601)
+    clock.tick(31)
+    assert len(w.observe({"alarm_control_panel.casa": R("armed_away")})) == 0
+    clock.tick(31)
+    assert len(w.observe({"alarm_control_panel.casa": R("triggered")})) == 1  # a new hour
+
+
+@pytest.mark.parametrize("data", [
+    {"enabled": True, "rules": RULES, "alarm_max_per_hour": 0},
+    {"enabled": True, "rules": RULES, "alarm_max_per_hour": 61},
+    {"enabled": True, "rules": RULES, "alarm_max_per_hour": True},
+])
+def test_a_bad_alarm_max_per_hour_is_refused(data):
+    with pytest.raises(hw.ConfigError):
+        hw.parse_config(data)
+
+
 def test_only_the_alarm_is_urgent():
     w, clock = watcher()
     readings = {"alarm_control_panel.casa": R("triggered"), "person.ana": R("home"),

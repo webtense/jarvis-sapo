@@ -1316,6 +1316,10 @@ async def _announce_needs_you(event: dict) -> None:
     else:
         line = f"{name} has stopped and wants you, sir."
     line = i18n.t(line)
+    # Something else is about to be said: a pending house-action proposal
+    # must stop listening for a spoken yes/no (it stays pending; see
+    # bridge.Bridge.note_other_speech).
+    bridge_state.note_other_speech()
     try:
         await speech.say(line, Priority.URGENT)
     except Exception as e:
@@ -1407,6 +1411,7 @@ async def _announce_batch() -> None:
     if projects:
         parts.append(i18n.t(_run_batch_line(projects)))
     line = " ".join(parts)
+    bridge_state.note_other_speech()
     try:
         await speech.say(line, Priority.LOW)
     except Exception as e:
@@ -1486,6 +1491,7 @@ async def _announce_run_stalled(run: dict, outcome: str) -> None:
     else:
         line = (f"The work in {project} finished, sir, but I can't see that "
                 f"it changed anything.")
+    bridge_state.note_other_speech()
     try:
         await speech.say(i18n.t(line), Priority.URGENT)
     except Exception as e:
@@ -1501,6 +1507,7 @@ async def _announce_run_failure(run: dict) -> None:
         line = f"The work in {project} ran out of time, sir."
     else:
         line = f"The work in {project} failed, sir."
+    bridge_state.note_other_speech()
     try:
         await speech.say(i18n.t(line), Priority.URGENT)
     except Exception as e:
@@ -6494,6 +6501,9 @@ async def bridge_speak(request: Request):
             raise bridge.Refused("JARVIS ya tiene varios avisos en cola.")
     except bridge.Refused as e:
         return _bridge_reply(False, str(e))
+    # Another session is about to speak through JARVIS: disarm whatever
+    # proposal was waiting for a spoken yes/no (it stays pending).
+    bridge_state.note_other_speech()
     # LOW: batched, and only at a pause. Never URGENT, and never over the
     # user's own voice or the brain's answer.
     utt = await _bridge_say(bridge.frame_speak(label, text),
@@ -6519,6 +6529,7 @@ async def bridge_ask(request: Request):
         q = bridge_state.open_question(text, label)
     except bridge.Refused as e:
         return _bridge_reply(False, str(e))
+    bridge_state.note_other_speech()
     try:
         # NORMAL but not immediate: waits for the user to stop talking, is
         # not batched, and is not URGENT — it cannot cut anybody off.
@@ -6573,6 +6584,7 @@ async def bridge_remember(request: Request):
         bridge_state.admit("remember", fact)
     except bridge.Refused as e:
         return _bridge_reply(False, str(e))
+    bridge_state.note_other_speech()
     proposal = bridge_state.propose(fact, label)
     epoch = bridge_state.brain_epoch
     utt = await _bridge_say(bridge.frame_remember(label, fact),
@@ -6664,7 +6676,9 @@ async def _bridge_take_utterance(text: str) -> bool:
     proposal = bridge_state.awaiting_decision()
     if proposal is None:
         return False
-    decision = bridge.classify_decision(text, strict=proposal.kind == "home")
+    is_home = proposal.kind == "home"
+    decision = bridge.classify_decision(
+        text, strict=is_home, require_two=is_home and home_actions.confirm_strict())
     if decision is None:
         return False
     line = await _bridge_decide(proposal.id, decision == "yes", spoken=True)
@@ -6750,23 +6764,34 @@ async def tool_home_propose(args: dict) -> str:
                 "Tell the user.")
     spoken = home_actions.question(action)
     bridge_state.drop_kind("home")          # one pending action at a time
+    bridge_state.note_other_speech()        # this question replaces whatever was armed
     proposal = bridge_state.propose(spoken, "home", kind="home",
                                     payload=action.as_dict(),
                                     window=bridge.HOME_CONFIRM_WINDOW)
     home_actions.audit(action, confirmed_by="none", result="proposed")
     epoch = bridge_state.brain_epoch
     utt = await _bridge_say(spoken, priority=Priority.NORMAL, immediate=False)
-    if utt is not None:
-        _spawn(_bridge_announced_when_spoken(proposal.id, utt, epoch))
-    elif not policy.panel_confirm:
-        bridge_state.take(proposal.id)
-        return ("Nobody can hear JARVIS right now, so nothing was asked and "
-                "nothing was done. Tell the user.")
     note = (" This is a dry run: nothing will really be touched."
             if home_actions.dryrun() else "")
-    return ("Pending the user's confirmation: JARVIS is asking him aloud, word "
-            "for word. NOTHING has been done. Say nothing more and end your "
-            "turn; never say it was done." + note)
+    if utt is not None:
+        # Somebody can hear JARVIS: the proposal will be armed once the
+        # question has been said in full, and the user's spoken "yes"/"no"
+        # decides it.
+        _spawn(_bridge_announced_when_spoken(proposal.id, utt, epoch))
+        return ("Pending the user's confirmation: JARVIS is asking him aloud, "
+                "word for word. NOTHING has been done. Say nothing more and "
+                "end your turn; never say it was done." + note)
+    if policy.panel_confirm:
+        # Nobody can hear JARVIS speak, but the proposal is not lost: it
+        # waits, visible and decidable, on the control panel.
+        return ("Pending the user's confirmation: nobody can hear JARVIS "
+                "speak right now, so nothing was said aloud. The proposal is "
+                "waiting to be confirmed or rejected on the control panel "
+                "instead. NOTHING has been done. Say nothing more and end "
+                "your turn; never say it was done." + note)
+    bridge_state.take(proposal.id)
+    return ("Nobody can hear JARVIS right now, so nothing was asked and "
+            "nothing was done. Tell the user.")
 
 
 TOOL_HANDLERS["home_propose"] = tool_home_propose
@@ -6850,6 +6875,9 @@ _home_watch_task: Optional[asyncio.Task] = None
 async def _home_alert_deliver(alert: "ha_watch.Alert") -> None:
     text = i18n.t(alert.text)
     if speech is not None and voice_clients:
+        # ha_watch is about to speak on its own, independent of any proposal
+        # or brain turn: disarm whatever was waiting for a spoken yes/no.
+        bridge_state.note_other_speech()
         if alert.urgent:
             await speech.say(text, Priority.URGENT, immediate=True)
         else:

@@ -157,12 +157,25 @@ def frame_remember(label: str, text: str) -> str:
 _YES = frozenset({"sí", "si", "vale", "guárdalo", "guardalo", "guárdala",
                   "guardala", "adelante", "confirma", "confirmo", "correcto",
                   "yes", "ok", "okay", "save", "keep", "sure", "confirm"})
-# What counts as "yes" to a proposed action on the house. Narrower than _YES:
-# "save", "keep" and "guárdalo" are answers about memories, and the thing
-# being decided here moves something in the real world.
-_YES_ACTION = frozenset({"sí", "si", "vale", "adelante", "confirma",
-                         "confirmo", "correcto", "hazlo", "yes", "ok",
-                         "okay", "sure", "confirm"})
+# What counts as "yes" to a proposed ACTION ON THE HOUSE. Deliberately much
+# narrower than `_YES`, and NOT the same list: a local Whisper transcription
+# can hallucinate a bare "Sí." or "Okay." over background noise or silence,
+# and that must never be read as consent to move something in the real
+# world. So, unlike `_YES` (memories): no "ok"/"okay"/"sure"/"confirm" without
+# the Spanish word, no unaccented "si", no "correcto", no mixing languages —
+# only a short, deliberate word is enough. "vale" alone is NOT enough (it is
+# the word most easily confused with a filler); it counts only said together
+# with one of the other words here ("vale, hazlo"). See docs/casa-control.md
+# for the residual risk (ambient audio, TV, a hallucinated transcription) and
+# the opt-in `JARVIS_HOME_CONFIRM_STRICT` that requires two of these words.
+_YES_ACTION_ES = frozenset({"sí", "hazlo", "adelante", "confirma", "confirmado"})
+_YES_ACTION_EN = frozenset({"yes", "confirm"})
+_YES_ACTION_WORDS = _YES_ACTION_ES | _YES_ACTION_EN
+_YES_ACTION_VALE = "vale"
+# Two-word English affirmatives ("do it", "go ahead"): each pair counts as
+# one hit, and both of its words are allowed in the reply.
+_YES_ACTION_PHRASES = (("do", "it"), ("go", "ahead"))
+_YES_ACTION_PHRASE_WORDS = frozenset(w for pair in _YES_ACTION_PHRASES for w in pair)
 _NO = frozenset({"no", "descarta", "descártalo", "descartalo", "descártala",
                  "olvídalo", "olvidalo", "rechaza", "rechazo", "nope",
                  "discard", "reject", "forget"})
@@ -178,26 +191,60 @@ def _words(text: str) -> list[str]:
     return _WORD_RE.findall((text or "").lower())
 
 
-def classify_decision(text: str, *, strict: bool = False) -> Optional[str]:
-    """'yes', 'no' or None for the user's reply to "shall I keep it?".
+def _yes_action_hits(words: list[str]) -> int:
+    """How many separate, deliberate affirmatives for a house action are in
+    `words`. A single word from `_YES_ACTION_WORDS` is one hit; the English
+    two-word phrases ("do it", "go ahead") are one hit each; "vale" is a hit
+    only together with at least one other hit — it is never enough alone."""
+    hits = sum(1 for w in words if w in _YES_ACTION_WORDS)
+    for a, b in zip(words, words[1:]):
+        if (a, b) in _YES_ACTION_PHRASES:
+            hits += 1
+    if _YES_ACTION_VALE in words and hits > 0:
+        hits += 1
+    return hits
+
+
+def classify_decision(text: str, *, strict: bool = False,
+                      require_two: bool = False) -> Optional[str]:
+    """'yes', 'no' or None for the user's reply to "shall I keep it?" (or, for
+    a proposed house action, to "shall I turn it off, sir?").
 
     Deliberately narrow: at most four words, all of them from a short list.
     A sentence about something else is NOT a decision and goes to the brain
     as usual. Plain matching on purpose — the thing deciding whether a
-    proposal from an untrusted session becomes a memory is not a model.
+    proposal from an untrusted session becomes a memory, or whether an action
+    on the house goes ahead, is not a model.
 
-    `strict` is for a proposed action on the house: a shorter list of yeses
-    (`_YES_ACTION`), the same "no".
+    `strict` is for a proposed action on the house: a much narrower, harder
+    to hallucinate list of yeses (`_YES_ACTION_WORDS`), the same "no".
+    `require_two` (only meaningful with `strict`) is the opt-in
+    `JARVIS_HOME_CONFIRM_STRICT`: a single word such as "sí" is then not
+    enough, and the reply needs two of these affirmatives ("sí, hazlo",
+    "yes, do it").
     """
     words = _words(text)
     if not words or len(words) > 4:
         return None
-    yes_words = _YES_ACTION if strict else _YES
-    has_yes = any(w in yes_words for w in words)
+    if strict:
+        hits = _yes_action_hits(words)
+        has_yes = hits >= (2 if require_two else 1)
+        has_no = any(w in _NO for w in words)
+        if has_yes == has_no:          # neither, or both: ambiguous
+            return None
+        if has_yes:
+            allowed = (_YES_ACTION_WORDS | {_YES_ACTION_VALE}
+                      | _YES_ACTION_PHRASE_WORDS | _FILLER)
+        else:
+            allowed = _NO | _FILLER
+        if not all(w in allowed for w in words):
+            return None
+        return "yes" if has_yes else "no"
+    has_yes = any(w in _YES for w in words)
     has_no = any(w in _NO for w in words)
     if has_yes == has_no:              # neither, or both: ambiguous
         return None
-    allowed = (yes_words if has_yes else _NO) | _FILLER
+    allowed = (_YES if has_yes else _NO) | _FILLER
     if not all(w in allowed for w in words):
         return None
     return "yes" if has_yes else "no"
@@ -373,6 +420,21 @@ class Bridge:
         """The brain started talking: whatever question the user may now be
         answering is the brain's. Every announced proposal stops listening for
         a yes/no (it stays pending, decidable on the dashboard)."""
+        self._disarm_proposals()
+
+    def note_other_speech(self) -> None:
+        """JARVIS said something ELSE after a question was asked: another
+        session's `/internal/bridge/speak` or `/ask`, an `ha_watch` alert, or
+        a run announcement (it started, stalled, finished, failed). Whatever
+        the user says next might be an answer to THAT, not to the pending
+        proposal, so the same disarming as `note_brain_turn` applies — the
+        proposal stays pending (and decidable on the dashboard/panel), it is
+        just no longer armed for a spoken yes/no. Call this BEFORE speaking
+        the other sentence, never after: a pending proposal that has not yet
+        been announced must not be disarmed by its own announcement."""
+        self._disarm_proposals()
+
+    def _disarm_proposals(self) -> None:
         self._brain_epoch += 1
         for p in self.proposals.values():
             p.announced_at = None

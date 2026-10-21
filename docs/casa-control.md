@@ -24,7 +24,7 @@ Quién puede intentar que JARVIS toque tu casa sin que tú quieras, y qué lo im
 | Una web, un README, un transcript de otra sesión o un mensaje de Home Assistant leídos por el cerebro | Que el cerebro proponga "abre la puerta del garaje" | El cerebro **solo propone**. Además, en el turno en que ha leído algo ajeno (web, fichero de un proyecto, otra sesión, Home Assistant) la herramienta `home_propose` se niega: tienes que pedirlo de nuevo, con tus palabras, en un turno limpio. Y aun proponiendo, nada se ejecuta sin tu "sí" hablado |
 | El propio cerebro, engañado o equivocado | Ejecutar directamente | No hay ninguna herramienta que ejecute. La ejecución vive en una función del servidor que solo se alcanza desde tu "sí" (o desde el panel, si lo activas). Un test lo comprueba: `home_actions.perform` se llama en un único sitio |
 | Una sesión de otro Claude Code (puente MCP) | Colar una acción | El puente no tiene ninguna ruta hacia el control de la casa, ni su token abre `home_propose` |
-| Un "sí" dirigido al cerebro ("¿quieres que lo busque?" "sí") | Que cuente como "sí" a una acción | El "sí" solo vale si JARVIS acaba de decir la frase entera (cuenta desde que terminó de hablar), dentro de una ventana de 12 segundos y mientras el cerebro no haya vuelto a hablar. Solo valen palabras sueltas como "sí", "vale", "adelante", "confirma", "hazlo"; "guárdalo" o una frase larga no valen |
+| Un "sí" dirigido al cerebro ("¿quieres que lo busque?" "sí") | Que cuente como "sí" a una acción | El "sí" solo vale si JARVIS acaba de decir la frase entera (cuenta desde que terminó de hablar), dentro de una ventana de 12 segundos y mientras nadie — ni el cerebro, ni otra sesión por el puente, ni un aviso de `ha_watch`, ni un aviso de un *run* — haya vuelto a hablar por medio. Solo valen palabras sueltas y deliberadas: en castellano "sí" (con tilde), "hazlo", "adelante", "confirma", "confirmado" (y "vale" solo acompañado de otra de estas); en inglés "yes", "confirm", "do it", "go ahead". "ok", "okay", "sure", "correcto", "confirmo", "si" sin tilde o un "vale" suelto **no** valen para una acción, aunque sí valgan para confirmar una memoria — son las palabras que una transcripción local (Whisper) aluciona más fácilmente sobre ruido o silencio. Activable `JARVIS_HOME_CONFIRM_STRICT=1` para exigir dos de esas palabras juntas ("sí, hazlo" / "yes, do it") |
 | Un dominio peligroso | Alarma, cerraduras, cámaras, scripts, automatizaciones... | Prohibidos **por código** aunque los pongas en tu fichero: `alarm_control_panel`, `lock`, `camera`, `script`, `automation`, `shell_command`, `homeassistant.*`, `persistent_notification`. Cualquier otro dominio o servicio no listado en el código tampoco funciona |
 | Un identificador manipulado | `LIGHT.salon`, `light.salon/../lock/unlock`, una "а" cirílica | Solo valen `a-z`, `0-9` y `_`, exactamente. Nada se normaliza: lo que no encaja se rechaza. La ruta del servicio se construye solo con dominio y servicio ya validados y se revisa una vez más antes de abrir el socket |
 | Una redirección de Home Assistant (o de quien lo suplante) | Hacer que el token viaje a otro servidor | No se sigue ninguna redirección y no se usa proxy |
@@ -49,6 +49,21 @@ Dilo claro, porque es lo más importante:
   Por eso confirmar desde el panel está desactivado salvo que tú lo actives.
 - Una acción confirmada se hace con el estado que hay *ahora*: si la lista cambió entre la
   pregunta y el "sí", se rechaza; pero no se comprueba el estado físico de la casa.
+- **Audio ambiente, una tele.** No hay reconocimiento de quién habla: una tele que diga
+  "Jarvis, abre la persiana" y después "sí" basta para confirmar, salvo que el micrófono no
+  oiga esa frase como wake word. Si vas a permitir un `cover` o un `switch` que de verdad
+  importe, actívalo solo con `JARVIS_STT=local` y `JARVIS_WAKE_WORD=on` (`docs/stt-local.md`)
+  — para que JARVIS solo escuche tras "Jarvis" — y además `JARVIS_HOME_CONFIRM_STRICT=1`, para
+  que una sola palabra alucinada nunca baste.
+- **Un *run* sin supervisión, con Bash, del mismo usuario.** Puede leer `/proc/<pid>/environ`
+  de un proceso de JARVIS y los ficheros `600` (tokens, `home-actions.json`), llamar él mismo
+  a Home Assistant sin pasar por nada de esto, y editar o reescribir `home-actions.json` o
+  `home-actions.log` — la auditoría es falsificable por ese mismo usuario, no es una prueba
+  ante un tercero. `claude_env` le quita las variables de acciones, pero un proceso que lee
+  ficheros no las necesita. Si activas el control de la casa, considera un usuario de sistema
+  **distinto** del tuyo para ejecutar JARVIS (y sus *runs*), de forma que ni el token ni el
+  fichero de la lista blanca ni el log sean legibles o editables desde tu propia sesión de
+  Bash habitual.
 
 ## Preparar el token aparte en Home Assistant
 
@@ -120,7 +135,11 @@ Es tu fichero. JARVIS no lo crea ni lo edita. Hay un ejemplo inactivo en
 - `limits.max_per_minute`: de 1 a 10 (3 por defecto). Pasado el límite, JARVIS dice que
   espera y no hace nada.
 - `panel_confirm`: `false` por defecto. Si lo pones a `true`, también se puede confirmar
-  desde el panel (`POST /api/home/<id>/confirm`); rechazar se puede siempre.
+  desde el panel (`POST /api/home/<id>/confirm`); rechazar se puede siempre. **Pendiente:**
+  el panel (`/dashboard`) todavía no tiene botones de Confirmar/Rechazar para una propuesta
+  de acción sobre la casa — hoy solo se puede confirmar o rechazar llamando a esa API
+  directamente (o de viva voz). El backend y `snapshot()["home"]` ya exponen lo necesario;
+  falta la interfaz.
 - El fichero debe ser tuyo, un fichero normal (no un enlace) y **no escribible por grupo ni
   otros** (`chmod 600`); si no, JARVIS lo ignora y lo dice en el log. Un fichero con
   `enabled` distinto de `true`, roto o sin entidades útiles deja el control apagado.
@@ -133,9 +152,11 @@ Es tu fichero. JARVIS no lo crea ni lo edita. Hay un ejemplo inactivo en
    lista y, si no encaja, se rechaza y se anota. Si encaja, **no se hace nada** todavía.
 3. JARVIS dice la acción entera: "¿Apago la luz del salón, señor?". Solo hay una acción
    pendiente a la vez; una nueva sustituye a la anterior.
-4. Contestas "sí" (o "vale", "adelante", "confirma", "hazlo"), con la ventana de 12
-   segundos desde que acabó la frase. Un "no" la descarta. Cualquier otra cosa se trata
-   como una conversación normal.
+4. Contestas "sí" (o "hazlo", "adelante", "confirma", "confirmado"; "vale" solo si va con
+   otra de esas), con la ventana de 12 segundos desde que acabó la frase — y solo si nadie
+   ha dicho nada más por medio (ver más abajo). Un "no" la descarta. Cualquier otra cosa se
+   trata como una conversación normal. Con `JARVIS_HOME_CONFIRM_STRICT=1` hace falta decir
+   dos de esas palabras juntas ("sí, hazlo"), nunca una sola.
 5. Se vuelve a comprobar tu lista, el límite por minuto y que el registro se pueda escribir.
    Después se hace **una sola** petición `POST /api/services/<dominio>/<servicio>` con
    `entity_id` y los parámetros validados, y JARVIS dice "Hecho, señor." (o por qué no).
@@ -184,8 +205,11 @@ Para no cansarte:
 - **Antirrebote** (`debounce_s`): la condición tiene que mantenerse ese tiempo (90 s por
   defecto en personas, 60 s en consumo). Un GPS que baila en el borde de casa no son tres
   llegadas.
-- `min_interval_s` por regla y evento, y `max_per_hour` en total (la alarma no cuenta en
-  este último, el resto sí).
+- `min_interval_s` por regla y evento (mínimo 30 s), y `max_per_hour` en total — la alarma
+  no cuenta en este último (merece repetirse si de verdad suena) pero sí tiene su propio
+  tope, `alarm_max_per_hour` (10 por defecto, hasta 60): una regla de alarma que alterne
+  entre `triggered` y `disarmed` podría si no hablar en URGENT cada `min_interval_s` sin
+  límite. Al alcanzarlo queda anotado en el log del servidor.
 - `unavailable`, `unknown`, una entidad que no existe o un Home Assistant caído son "sin
   información", nunca un cambio: que Home Assistant se reinicie no hace que todos "salgan".
 - Los consumos usan una histéresis del 10 %: tras avisar, no vuelve a avisar hasta bajar de

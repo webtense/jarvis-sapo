@@ -522,6 +522,14 @@ def dryrun() -> bool:
     return os.environ.get("JARVIS_HOME_DRYRUN", "").strip().lower() in ("1", "true", "yes")
 
 
+def confirm_strict() -> bool:
+    """Opt-in: a spoken "yes" to a house action must be two deliberate words
+    ("sí, hazlo" / "yes, do it"), never one — see `bridge.classify_decision`
+    and docs/casa-control.md's residual risk about a hallucinated or
+    ambient-audio "yes"."""
+    return os.environ.get("JARVIS_HOME_CONFIRM_STRICT", "").strip().lower() in ("1", "true", "yes")
+
+
 def perform(action: Action) -> Outcome:
     """Do it (or, in dry-run, do nothing). Never raises, never returns a body."""
     try:

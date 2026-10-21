@@ -293,6 +293,17 @@ async def test_with_nobody_to_hear_it_the_panel_may_hold_it_if_the_file_says_so(
     env.server.voice_clients.clear()
     text = await propose(env)
     assert "Pending" in text and len(homes(env)) == 1
+    # Finding #3 of the security audit: with nobody to hear JARVIS, the tool
+    # result must not claim it is "asking him aloud" — the brain must not
+    # believe a question was ever spoken when it was not.
+    assert "asking him aloud" not in text
+    assert "nobody can hear" in text.lower() and "panel" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_with_somebody_to_hear_it_the_message_says_it_was_asked_aloud(env):
+    text = await propose(env)
+    assert "asking him aloud" in text
 
 
 @pytest.mark.asyncio
@@ -380,7 +391,13 @@ async def test_a_no_does_nothing(env):
 @pytest.mark.parametrize("words", [
     "guárdalo", "save it", "keep", "vale pero antes dime la hora",
     "sí y apaga también el garaje", "sí no", "quizá", "qué tiempo hace",
-    "sí sí sí sí sí", "claro", "dale"])
+    "sí sí sí sí sí", "claro", "dale",
+    # Narrower than the memory flow on purpose (see bridge._YES_ACTION_WORDS):
+    # a word that is a perfectly good "yes" to "shall I keep this memory?" is
+    # NOT deliberate enough to move something in the real world, and a bare
+    # "vale" is the word most easily mistaken for a filler, so it never
+    # counts alone — only together with another affirmative.
+    "si", "ok", "okay", "sure", "confirm", "confirmo", "correcto", "vale"])
 async def test_only_a_plain_yes_counts(env, words):
     await propose(env)
     await announce(env)
@@ -389,8 +406,9 @@ async def test_only_a_plain_yes_counts(env, words):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("words", ["sí", "Sí.", "vale", "adelante", "confirma",
-                                   "hazlo", "sí, hazlo", "yes", "ok", "sí por favor"])
+@pytest.mark.parametrize("words", ["sí", "Sí.", "adelante", "confirma", "confirmado",
+                                   "hazlo", "sí, hazlo", "vale hazlo", "yes",
+                                   "do it", "go ahead", "sí por favor"])
 async def test_the_yeses_that_do_count(env, words):
     await propose(env)
     await announce(env)
@@ -736,13 +754,97 @@ def test_the_new_proposals_are_memories_by_default():
 
 
 def test_strict_yes_is_narrower_than_a_memorys():
-    for words in ("guárdalo", "save", "keep it", "guárdala"):
+    for words in ("guárdalo", "save", "keep it", "guárdala", "ok", "okay",
+                 "sure", "correcto", "si", "vale"):
         assert bridge.classify_decision(words) == "yes"
         assert bridge.classify_decision(words, strict=True) is None
-    for words in ("sí", "vale", "adelante", "confirma", "hazlo"):
+    for words in ("sí", "adelante", "confirma", "confirmado", "hazlo", "yes",
+                 "confirm"):
         assert bridge.classify_decision(words, strict=True) == "yes"
+    # "vale" is never enough alone, memory flow or not; it counts for an
+    # action only paired with another affirmative word.
+    assert bridge.classify_decision("vale", strict=True) is None
+    assert bridge.classify_decision("vale hazlo", strict=True) == "yes"
     assert bridge.classify_decision("no", strict=True) == "no"
     assert bridge.classify_decision("no, descártalo", strict=True) == "no"
+
+
+def test_home_confirm_strict_requires_two_words(monkeypatch):
+    monkeypatch.setenv("JARVIS_HOME_CONFIRM_STRICT", "1")
+    assert home_actions.confirm_strict() is True
+    assert bridge.classify_decision("sí", strict=True, require_two=True) is None
+    assert bridge.classify_decision("sí, hazlo", strict=True, require_two=True) == "yes"
+    assert bridge.classify_decision("yes, do it", strict=True, require_two=True) == "yes"
+    # "no" is unaffected: one word is always enough to refuse.
+    assert bridge.classify_decision("no", strict=True, require_two=True) == "no"
+
+
+def test_home_confirm_strict_is_off_by_default(monkeypatch):
+    monkeypatch.delenv("JARVIS_HOME_CONFIRM_STRICT", raising=False)
+    assert home_actions.confirm_strict() is False
+
+
+@pytest.mark.asyncio
+async def test_home_confirm_strict_env_is_honoured_end_to_end(env, monkeypatch):
+    monkeypatch.setenv("JARVIS_HOME_CONFIRM_STRICT", "1")
+    await propose(env)
+    await announce(env)
+    assert await say(env, "sí") is False               # one word is not enough now
+    assert env.calls == [] and len(homes(env)) == 1
+    assert await say(env, "sí, hazlo") is True
+    assert len(env.calls) == 1
+
+
+def test_note_other_speech_disarms_without_cancelling():
+    b = bridge.Bridge()
+    p = b.propose("Shall I turn it off, sir?", "demo", kind="home",
+                  window=bridge.HOME_CONFIRM_WINDOW)
+    b.mark_announced(p.id)
+    assert b.awaiting_decision() is not None
+    b.note_other_speech()
+    assert b.awaiting_decision() is None                # disarmed...
+    assert p.id in b.proposals                          # ...but still pending
+
+
+@pytest.mark.asyncio
+async def test_unrelated_bridge_speak_disarms_a_pending_home_proposal(env):
+    """Finding #2 of the security audit: a `/internal/bridge/speak` from
+    ANOTHER session, spoken between the question and the user's answer, must
+    not leave the house proposal armed for a stray "yes" that was meant for
+    that other sentence. The proposal itself is not lost (it stays pending,
+    decidable on the panel) — it just stops listening for a spoken yes/no."""
+    await propose(env)
+    await announce(env)
+    assert env.server.bridge_state.awaiting_decision() is not None
+    token = env.server.data_paths.ensure_bridge_token()
+    r = env.client.post("/internal/bridge/speak",
+                        headers={"Authorization": f"Bearer {token}"},
+                        json={"session": "otra", "text": "Algo totalmente distinto."})
+    assert r.status_code == 200
+    assert env.server.bridge_state.awaiting_decision() is None
+    assert await say(env, "sí") is False
+    assert env.calls == [] and len(homes(env)) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_run_failure_announcement_disarms_a_pending_home_proposal(env):
+    await propose(env)
+    await announce(env)
+    assert env.server.bridge_state.awaiting_decision() is not None
+    await env.server._announce_run_failure({"status": "failed", "id": "r1"})
+    assert env.server.bridge_state.awaiting_decision() is None
+    assert len(homes(env)) == 1                         # still pending
+
+
+@pytest.mark.asyncio
+async def test_an_ha_watch_alert_disarms_a_pending_home_proposal(env):
+    import ha_watch
+    await propose(env)
+    await announce(env)
+    assert env.server.bridge_state.awaiting_decision() is not None
+    await env.server._home_alert_deliver(ha_watch.Alert("r1", "Alguien ha llegado a casa."))
+    assert env.server.bridge_state.awaiting_decision() is None
+    assert len(homes(env)) == 1
 
 
 # --- spoken alerts ----------------------------------------------------------------------
