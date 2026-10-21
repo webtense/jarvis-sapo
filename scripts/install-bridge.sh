@@ -22,7 +22,7 @@ case "${1:-}" in
   *) echo "Uso: $0 [--dry-run|--uninstall]" >&2; exit 2 ;;
 esac
 
-command -v claude >/dev/null || { echo "Falta 'claude' (Claude Code) en el PATH." >&2; exit 1; }
+command -v claude >/dev/null || { echo "ERROR: falta 'claude' (Claude Code) en el PATH." >&2; exit 1; }
 
 if [[ "$MODE" == "uninstall" ]]; then
   claude mcp remove "$NAME" --scope user
@@ -30,7 +30,7 @@ if [[ "$MODE" == "uninstall" ]]; then
   exit 0
 fi
 
-[[ -f "$SERVER" ]] || { echo "No encuentro $SERVER" >&2; exit 1; }
+[[ -f "$SERVER" ]] || { echo "ERROR: no encuentro $SERVER" >&2; exit 1; }
 
 # Python: el venv del repo si existe (es el que JARVIS usa), si no el del sistema.
 PY="${JARVIS_PYTHON:-}"
