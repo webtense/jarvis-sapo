@@ -16,6 +16,15 @@ def _pin_host_to_macos(monkeypatch, request):
 
 
 @pytest.fixture(autouse=True)
+def _pin_language_to_english(monkeypatch):
+    """The upstream suite asserts English sentences. Until now that was only
+    guaranteed by `JARVIS_LANGUAGE` being unset; a development `.env` with
+    `es` would have broken hundreds of tests. Tests of the Spanish path set it
+    themselves with their own monkeypatch, which wins over this one."""
+    monkeypatch.setenv("JARVIS_LANGUAGE", "en")
+
+
+@pytest.fixture(autouse=True)
 def _no_local_voice_unless_asked(monkeypatch, request):
     """A developer with Piper installed must still get the same results from
     the upstream suite, which assumes Fish is the only voice. Tests of the

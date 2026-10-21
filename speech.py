@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Awaitable, Callable, Optional
 
+import i18n
+
 log = logging.getLogger("jarvis.speech")
 
 _ABBREVIATIONS = {
@@ -245,7 +247,11 @@ SHORT_UTTERANCE_TOKENS = 2
 Synthesize = Callable[[str], Awaitable[Optional[bytes]]]
 Emit = Callable[[dict], Awaitable[None]]
 
-_TOKEN_RE = re.compile(r"[a-z0-9']+")
+# Spanish letters count as letters. Without them "señor" splits into "se" and
+# "or" and "está" into "est", on both sides of the echo comparison alike, so
+# nothing breaks, but any two short fragments then "match" far too easily.
+# English text tokenises exactly as before: it contains none of them.
+_TOKEN_RE = re.compile(r"[a-z0-9áéíóúüñ']+")
 
 
 def _tokens(text: str) -> list[str]:
@@ -1176,7 +1182,7 @@ class SpeechScheduler:
                 if not await self._send({"type": "text", "text": chunk.text}, u):
                     return False
                 if chunk.notice:
-                    await self._send({"type": "text", "text": "My voice is failing, sir."}, u)
+                    await self._send({"type": "text", "text": i18n.t("My voice is failing, sir.")}, u)
                 progressed = True
                 continue
             await self._set_speaking(True)

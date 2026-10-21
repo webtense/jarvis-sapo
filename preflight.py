@@ -39,6 +39,7 @@ from typing import Optional
 
 import claude_env
 import host
+import i18n
 import screen
 
 log = logging.getLogger("jarvis.preflight")
@@ -802,13 +803,17 @@ def spoken_summary(checks: list["Check"]) -> str:
     if not issues:
         return ""
 
-    phrases = [_phrase_for(c) for c in issues]
+    # Each phrase is translated on its own and the frame around them after:
+    # the frame is matched whole, and the phrases are ours, never a check's raw
+    # message (which stays English: it is written for logs, not for the ear).
+    phrases = [i18n.t(_phrase_for(c)) for c in issues]
 
     if len(phrases) == 1:
-        return f"One thing needs attention, sir: {phrases[0]}."
+        return i18n.t(f"One thing needs attention, sir: {phrases[0]}.")
     if len(phrases) == 2:
-        return f"Two things need attention, sir: {phrases[0]}, and {phrases[1]}."
-    return (
+        return i18n.t(
+            f"Two things need attention, sir: {phrases[0]}, and {phrases[1]}.")
+    return i18n.t(
         f"{len(phrases)} things need attention, sir: "
         + ", ".join(phrases[:-1])
         + f", and {phrases[-1]}."
