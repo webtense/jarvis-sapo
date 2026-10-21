@@ -263,6 +263,17 @@ async def test_a_recogniser_that_dies_at_once_does_not_restart_in_a_loop(start_j
 
 # --- el botón MUTE de la pantalla principal --------------------------------
 
+async def dismiss_first_run_settings(page) -> None:
+    """Sin clave de voz, la página abre sola el panel de Ajustes (a los ~2 s):
+    es un modal, y tapa el botón igual que taparía cualquier otro. Se cierra
+    como lo haría una persona, con su botón."""
+    try:
+        await page.wait_for_selector("#settings-container.open", timeout=8000)
+    except Exception:
+        return                      # no se abrió: nada que cerrar
+    await page.click("#settings-close")
+    await page.wait_for_selector("#settings-container", state="hidden", timeout=5000)
+
 async def test_the_mute_button_toggles_and_shows_its_state(start_jarvis):
     """El botón grande existe, es accesible, alterna con el ratón y con la
     tecla M, y su estado se lee en la etiqueta y en `aria-pressed`."""
@@ -277,6 +288,7 @@ async def test_the_mute_button_toggles_and_shows_its_state(start_jarvis):
             button = page.locator("#mute-toggle")
             # `data-ready` lo pone la página cuando ya atiende el botón.
             await page.wait_for_selector("#mute-toggle[data-ready='1']", timeout=10000)
+            await dismiss_first_run_settings(page)
 
             # Visible y grande, no escondido en el menú ☰.
             assert await button.is_visible()
@@ -342,6 +354,7 @@ async def test_a_muted_microphone_sends_no_audio_to_the_server(start_jarvis):
 
             # Tiempo de sobra para que la frase (~2,5 s) hubiera dado un turno.
             await asyncio.sleep(9)
+            await dismiss_first_run_settings(page)
             await tap.refresh()
             assert not tap.mic("transcript"), "a muted page still got a transcript"
             assert not jarvis.events("transcribe"), "audio reached the server while muted"

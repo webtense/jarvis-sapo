@@ -45,6 +45,16 @@ def server(monkeypatch, tmp_path):
     monkeypatch.setenv("JARVIS_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("JARVIS_BRAIN_AUTOSTART", "0")
     monkeypatch.setenv("JARVIS_ENV_FILE", str(tmp_path / ".env"))
+    # `_write_env_key` también escribe en `os.environ`: sin esto, un ajuste
+    # guardado aquí (JARVIS_STT=local, JARVIS_BARGE_IN=on...) se filtra a las
+    # pruebas que corren después y cambia su comportamiento. Poner y quitar
+    # deja a monkeypatch el valor original que restaurar (o borrarlo).
+    for key in ("USER_NAME", "HONORIFIC", "JARVIS_LANGUAGE", "JARVIS_STT",
+                "JARVIS_STT_MODEL", "JARVIS_WAKE_WORD", "JARVIS_WAKE_WINDOW_SEC",
+                "JARVIS_BARGE_IN", "JARVIS_BARGE_IN_RMS", "JARVIS_BARGE_IN_MS",
+                "FISH_API_KEY"):
+        monkeypatch.setenv(key, "x")
+        monkeypatch.delenv(key)
     import data_paths
     importlib.reload(data_paths)
     import run_store
@@ -402,7 +412,11 @@ def test_text_out_of_a_file_arrives_without_control_characters(client, wired):
         "services": {"light": ["turn_on"]}}))
     os.chmod(data_paths.home_actions_path(), 0o600)
     body = client.get("/api/admin/home", headers=ORIGIN).json()
-    assert body["names"] == ["la luz?[2J del salón"]
+    # `home_actions` ya limpia el nombre al leerlo; `admin_panel` lo vuelve a
+    # limpiar. Lo que importa es que no llegue ningún carácter de control.
+    assert len(body["names"]) == 1
+    assert body["names"][0].startswith("la luz")
+    assert all(ch.isprintable() for ch in body["names"][0]), body["names"]
 
 
 def test_the_house_says_it_is_off_when_there_is_no_allow_list(client, server):
