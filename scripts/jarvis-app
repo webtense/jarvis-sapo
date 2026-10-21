@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Abre JARVIS como una aplicación: arranca el servicio si hace falta, espera a
+# que la página responda y la abre en una ventana propia (Chrome --app; si no
+# hay Chrome o Chromium, Firefox). No usa sudo.
+#
+#   scripts/jarvis-app               arranca si falta y abre la ventana
+#   scripts/jarvis-app --start-only  solo se asegura de que JARVIS esté en marcha
+#
+# Variables opcionales:
+#   JARVIS_URL        dirección de la página (por defecto http://localhost:5173)
+#   JARVIS_BROWSER    navegador a usar (por ejemplo google-chrome o firefox)
+#   JARVIS_WAIT_SEC   cuánto esperar a que arranque (por defecto 60)
+#
+# Cómo arranca, por orden:
+#   1. Si el puerto ya escucha, no toca nada.
+#   2. Si existe jarvis.service, pide a systemd que lo arranque
+#      (`systemctl start`; sin sudo puede pedir la contraseña en una ventana de
+#      polkit, o negarse: entonces pasa al punto 3).
+#   3. Si no, lanza scripts/start-ubuntu.sh en segundo plano con el usuario
+#      actual, con el registro en ~/.cache/jarvis/app.log.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+URL="${JARVIS_URL:-http://localhost:5173}"
+WAIT_SEC="${JARVIS_WAIT_SEC:-60}"
+OPEN=1
+case "${1:-}" in
+  "") ;;
+  --start-only) OPEN=0 ;;
+  -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  *) echo "Uso: $0 [--start-only]" >&2; exit 2 ;;
+esac
+
+# Puerto de la URL (5173 si no lleva).
+PORT="$(printf '%s' "$URL" | sed -n 's#^[a-z]*://[^/:]*:\([0-9][0-9]*\).*#\1#p')"
+PORT="${PORT:-5173}"
+
+say() { printf 'jarvis-app: %s\n' "$*" >&2; }
+
+notify() {
+  command -v notify-send >/dev/null 2>&1 && notify-send -a JARVIS "JARVIS" "$1" >/dev/null 2>&1 || true
+}
+
+listening() {
+  if command -v ss >/dev/null 2>&1; then
+    ss -H -ltn "sport = :$PORT" 2>/dev/null | grep -q .
+  else
+    (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null
+  fi
+}
+
+service_installed() {
+  command -v systemctl >/dev/null 2>&1 &&
+    [[ "$(systemctl show -p LoadState --value jarvis.service 2>/dev/null)" == "loaded" ]]
+}
+
+start_jarvis() {
+  if service_installed; then
+    if systemctl is-active --quiet jarvis.service; then
+      say "jarvis.service ya está activo; esperando a que escuche en el puerto $PORT"
+      return 0
+    fi
+    say "arrancando jarvis.service"
+    if systemctl start jarvis.service 2>/dev/null; then
+      return 0
+    fi
+    say "systemd no me deja arrancarlo sin sudo; lo lanzo yo en segundo plano"
+  fi
+  local log_dir="${XDG_CACHE_HOME:-$HOME/.cache}/jarvis"
+  mkdir -p "$log_dir"
+  nohup setsid "$REPO/scripts/start-ubuntu.sh" >>"$log_dir/app.log" 2>&1 </dev/null &
+  say "lanzado scripts/start-ubuntu.sh (registro: $log_dir/app.log)"
+}
+
+if listening; then
+  :
+else
+  start_jarvis
+  waited=0
+  until listening; do
+    if (( waited >= WAIT_SEC )); then
+      say "JARVIS no ha respondido en ${WAIT_SEC} s."
+      notify "No ha arrancado. Mire ~/.cache/jarvis/app.log o 'journalctl -u jarvis'."
+      exit 1
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  # El puerto escucha antes de que la página esté lista del todo.
+  sleep 1
+fi
+
+(( OPEN )) || exit 0
+
+pick_browser() {
+  local candidate
+  if [[ -n "${JARVIS_BROWSER:-}" ]]; then
+    command -v "$JARVIS_BROWSER" >/dev/null 2>&1 && { echo "$JARVIS_BROWSER"; return 0; }
+    say "JARVIS_BROWSER=$JARVIS_BROWSER no está en el PATH; busco otro"
+  fi
+  for candidate in google-chrome google-chrome-stable chromium chromium-browser firefox; do
+    command -v "$candidate" >/dev/null 2>&1 && { echo "$candidate"; return 0; }
+  done
+  return 1
+}
+
+BROWSER_BIN="$(pick_browser)" || { say "no encuentro Chrome, Chromium ni Firefox"; notify "No encuentro ningún navegador."; exit 1; }
+case "$(basename "$BROWSER_BIN")" in
+  firefox*) exec "$BROWSER_BIN" --new-window "$URL" ;;
+  *)        exec "$BROWSER_BIN" --app="$URL" ;;
+esac
