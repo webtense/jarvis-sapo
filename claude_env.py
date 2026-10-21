@@ -34,7 +34,9 @@ SCRUBBED_ENV_KEYS = {"CLAUDECODE"}
 # environment (that is how an MCP server it launches gets configured), so this
 # list applies to runs only, not to child_env().
 RUN_SCRUBBED_ENV_KEYS = {"HA_URL", "HA_TOKEN", "HA_TOKEN_FILE", "BTR_ACI_BASIC_AUTH",
-                         "GOOGLE_TOKEN_FILE", "HA_ACTIONS_ALLOW_READ_TOKEN"}
+                         "GOOGLE_TOKEN_FILE", "HA_ACTIONS_ALLOW_READ_TOKEN",
+                         "EVOLUTION_TOKEN_FILE", "EVOLUTION_WRITE_TOKEN_FILE",
+                         "WHATSAPP_POLICY_FILE"}
 
 # The credential that CAN act on the house (docs/casa-control.md). Unlike the
 # read-only ones above it is used by the JARVIS server process itself, after
@@ -45,7 +47,13 @@ RUN_SCRUBBED_ENV_KEYS = {"HA_URL", "HA_TOKEN", "HA_TOKEN_FILE", "BTR_ACI_BASIC_A
 # same reasoning covers the Google WRITE credential (docs/google-escritura.md):
 # only the JARVIS server process, after the user's spoken "yes", has any use
 # for it — not the brain, not an MCP server it starts, not an unattended run.
-NEVER_INHERITED_PREFIXES = ("HA_ACTIONS_", "GOOGLE_WRITE_")
+#
+# The WhatsApp sending credentials are the same case: `EVOLUTION_WRITE_` is
+# removed from the brain and from every run, because only the server sends,
+# after the user's spoken "yes". (`EVOLUTION_TOKEN_FILE`, the reading file, IS
+# inherited by the brain, so that the MCP server it launches can use it; when
+# no separate write file is set the server falls back to that same file.)
+NEVER_INHERITED_PREFIXES = ("HA_ACTIONS_", "GOOGLE_WRITE_", "EVOLUTION_WRITE_")
 
 # asyncio.create_subprocess_exec gives a child's stdout/stderr StreamReader a
 # 64 KiB *line* buffer by default (asyncio.streams._DEFAULT_LIMIT). `claude -p

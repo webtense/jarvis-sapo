@@ -538,6 +538,23 @@ EXEMPT = {
         "response envelope, never rendered into prose"),
     "google_readonly_mcp.main": (
         "the same JSON-RPC envelope id, echoed on the internal-error path"),
+    "whatsapp_readonly_mcp.whatsapp_list_chats": (
+        "the read-only WhatsApp connection is a separate stdio process, not a "
+        "session or a run. The chat names and ids are other people's: each "
+        "passes `_clean` (control and bidirectional characters stripped, "
+        "truncated) and the whole answer is returned under UNTRUSTED_HEADER; "
+        "tests/test_whatsapp_readonly.py drives it"),
+    "whatsapp_readonly_mcp._resolve": (
+        "it compares the chat name WhatsApp reports with the name the user "
+        "asked for and returns only a JID and a `_clean`ed name, or a fixed "
+        "refusal sentence that echoes nothing; every tool that prints that "
+        "name does so under UNTRUSTED_HEADER, and test_whatsapp_readonly.py "
+        "drives it"),
+    "whatsapp_readonly_mcp.handle": (
+        "`id` is the JSON-RPC message id off the stdio channel, echoed in the "
+        "response envelope, never rendered into prose"),
+    "whatsapp_readonly_mcp.main": (
+        "the same JSON-RPC envelope id, echoed on the internal-error path"),
     "ha_watch.fetch_readings": (
         "the spoken-alerts watcher reads Home Assistant entity states, not a "
         "session or a run. Only `state`, a timestamp and a unit are kept (cut "
@@ -1787,7 +1804,8 @@ def test_a_whole_value_check_never_accepts_a_trailing_separator(server, name):
     accepted = "".join(c for c in alphabet if rx.fullmatch(c))
     # A gate that demands a PREFIX accepts no single character; it is given
     # a whole value here rather than allowed to skip.
-    prefixed = {"_MODEL_ID_RE": "claude-sonnet-5"}.get(name)
+    prefixed = {"_MODEL_ID_RE": "claude-sonnet-5",
+                "_WHATSAPP_READER_RE": "mcp__whatsapp__whatsapp_read_chat"}.get(name)
     if not accepted and not prefixed:
         pytest.skip(f"{name} accepts no single character from the alphabet")
     candidates = [accepted[:i] for i in range(1, len(accepted) + 1)]

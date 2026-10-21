@@ -766,8 +766,13 @@ def test_the_persona_in_castilian_names_the_same_tools_and_rules():
     # (data_paths.KNOWN_TEMPLATE_HASHES) and this fork does not touch it; both
     # controls are off unless the user writes their own allow-list, and each
     # tool is hidden from the brain until then.
+    # And the WhatsApp tools (the three readers of the user's own MCP server
+    # and `whatsapp_propose`): the same reasoning, the sending one hidden from
+    # the brain until the user writes his own whatsapp-actions.json.
     assert code(es_text) - code(en) == {"home_propose", "entity_id",
-                                        "google_propose", "action"}
+                                        "google_propose", "action",
+                                        "whatsapp_propose", "whatsapp_list_chats",
+                                        "whatsapp_read_chat", "whatsapp_search"}
     for spoken in ("empezar de cero",):
         assert spoken in es_text
     for loan in ("frontend", "transcript", "tests frente", "prompt "):

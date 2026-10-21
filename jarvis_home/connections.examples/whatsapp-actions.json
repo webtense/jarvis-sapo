@@ -1,0 +1,15 @@
+{
+  "//": "EJEMPLO NO ACTIVO (enabled: false). Para usarlo, copia este fichero a data/jarvis/whatsapp-actions.json, pon enabled a true y rellena contacts. El fichero debe ser tuyo y no escribible por otros (chmod 600). Sin este fichero no se envia nada. Cada mensaje se dice entero en voz alta, con su destinatario, y solo se envia si contestas que si. contacts: nombre que dira JARVIS -> JID individual (numero con prefijo de pais, sin +, seguido de @s.whatsapp.net); nunca grupos. self (opcional): tu propio JID, para 'mandame un mensaje a mi'. read_groups: JIDs de los unicos grupos (@g.us) que JARVIS puede LEER; vacio = ninguno. exclude: contactos, numeros o JIDs que JARVIS nunca ve ni usa. Las credenciales van APARTE (EVOLUTION_TOKEN_FILE, y opcionalmente EVOLUTION_WRITE_TOKEN_FILE). Ver docs/whatsapp.md.",
+  "enabled": false,
+  "panel_confirm": false,
+  "contacts": {
+    "Ejemplo": "34600000000@s.whatsapp.net"
+  },
+  "self": "",
+  "read_groups": [],
+  "exclude": [],
+  "limits": {
+    "max_per_minute": 2,
+    "max_chars": 500
+  }
+}

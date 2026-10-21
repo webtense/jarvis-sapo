@@ -247,7 +247,7 @@ EXAMPLES = sorted((REPO / "jarvis_home" / "connections.examples").glob("*.json")
 # Not MCP connections: the allow-list of home actions and the alert rules
 # (docs/casa-control.md). They have their own tests and are inactive too.
 _NOT_SERVERS = {"home-actions.json", "home-alerts.json", "ha-exclude.json",
-               "google-actions.json"}
+               "google-actions.json", "whatsapp-actions.json"}
 SERVER_EXAMPLES = [p for p in EXAMPLES if p.name not in _NOT_SERVERS]
 
 
@@ -256,7 +256,8 @@ def test_the_examples_exist():
     # the Google read-only connection; it is a third inactive MCP-server
     # example, not one of the non-server allowlist/alert files above.
     assert {p.name for p in EXAMPLES} == (
-        {"ha-readonly.json", "btr-aci-readonly.json", "google-readonly.json"} | _NOT_SERVERS)
+        {"ha-readonly.json", "btr-aci-readonly.json", "google-readonly.json",
+         "whatsapp-readonly.json"} | _NOT_SERVERS)
 
 
 @pytest.mark.parametrize("path", SERVER_EXAMPLES, ids=lambda p: p.name)

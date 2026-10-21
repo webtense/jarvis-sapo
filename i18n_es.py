@@ -563,6 +563,20 @@ PAIRS: list[tuple[str, str]] = [
     ("I couldn't do that, sir: the Google connection is not set up properly.",
      "No he podido hacerlo, señor: la conexión con Google no está bien configurada."),
 
+    # --- sending a WhatsApp (whatsapp_actions.py) -----------------------------
+    # `{name}` is the user's own name for the contact, `{text}` the message:
+    # both are copied, never translated.
+    ("Shall I send {name} this WhatsApp: «{text}», sir? I have just read messages "
+     "from other people, so say yes, do it, to confirm.",
+     "¿Envío a {name} este WhatsApp: «{text}», señor? Acabo de leer mensajes de otras "
+     "personas, así que para confirmar diga: sí, hazlo."),
+    ("Shall I send {name} this WhatsApp: «{text}», sir?",
+     "¿Envío a {name} este WhatsApp: «{text}», señor?"),
+    ("I couldn't reach WhatsApp, sir.", "No he podido contactar con WhatsApp, señor."),
+    ("WhatsApp refused it, sir.", "WhatsApp lo ha rechazado, señor."),
+    ("I couldn't do that, sir: the WhatsApp connection is not set up properly.",
+     "No he podido hacerlo, señor: la conexión con WhatsApp no está bien configurada."),
+
     # --- settings API (shown by the UI) --------------------------------------
     ("No key provided", "No se ha indicado ninguna clave"),
     ("Invalid API key", "Clave de API no válida"),

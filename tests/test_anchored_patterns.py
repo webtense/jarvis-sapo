@@ -275,6 +275,16 @@ SAMPLES = {
     "_EDGE_VOICE_RE": "es-ES-AlvaroNeural",
     "_PATH_RE": "/api/services/light/turn_on",
     "_DATETIME_RE": "2026-10-21T18:00:00+02:00",
+    # WhatsApp (whatsapp_policy.py, whatsapp_actions.py, whatsapp_readonly_mcp.py,
+    # server.py): identifiers with a fixed shape that no single character satisfies.
+    "DM_JID_RE": "34611111111@s.whatsapp.net",
+    "SEND_JID_RE": "34611111111@s.whatsapp.net",
+    "LID_JID_RE": "1234567890123@lid",
+    "GROUP_JID_RE": "120363000000000001@g.us",
+    "_NUMBER_RE": "34611111111",
+    "_PHONE_RE": "+34 622 222 222",
+    "_PHONE_ARG_RE": "+34 622 222 222",
+    "_WHATSAPP_READER_RE": "mcp__whatsapp__whatsapp_read_chat",
 }
 
 ALPHABET = ("abcdefghijklmnopqrstuvwxyz0123456789"

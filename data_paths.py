@@ -123,6 +123,18 @@ def google_actions_log_path() -> Path:
     return brain_home() / "google-actions.log"
 
 
+def whatsapp_actions_path() -> Path:
+    """The user's WhatsApp policy (see `whatsapp_policy.py`): who may be written
+    to, which groups may be read, whom to hide. His own file: JARVIS never
+    creates or edits it, and with no file there is no sending at all."""
+    return brain_home() / "whatsapp-actions.json"
+
+
+def whatsapp_actions_log_path() -> Path:
+    """Append-only JSONL audit of every WhatsApp message asked to be sent."""
+    return brain_home() / "whatsapp-actions.log"
+
+
 def ha_exclude_path() -> Path:
     """The user's Home Assistant exclusion list (see `ha_exclude.py`).
 
