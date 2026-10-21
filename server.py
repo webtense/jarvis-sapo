@@ -6925,11 +6925,13 @@ async def voice_handler(ws: WebSocket):
         # the opening frames cannot be overtaken by a broadcast that lands
         # while they are in flight.
         config = {"type": "config", "muteMicDuringSpeech": MUTE_MIC_DURING_SPEECH}
-        if stt_local.mode() == "local":
+        if stt_local.offers_local():
             # Only said when it is true: the default frame is byte-for-byte
             # what it always was, and a page that never heard of `stt` reads
-            # a missing key as the browser's own recogniser.
-            config["stt"] = "local"
+            # a missing key as the browser's own recogniser. "auto" lets the
+            # page choose: its own recogniser if it has one (Chrome), the
+            # local one if it does not (Firefox).
+            config["stt"] = stt_local.mode()
         _enqueue(queue, config)
         _enqueue(queue, {"type": "status", "state": "idle"})
 
@@ -7024,7 +7026,7 @@ async def mic_handler(ws: WebSocket):
     """
     global _mic_ws
     await ws.accept()
-    if stt_local.mode() != "local":
+    if not stt_local.offers_local():
         await ws.send_json({"type": "error", "text": "Local speech recognition is not enabled."})
         await ws.close(code=1008)
         return

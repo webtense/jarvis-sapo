@@ -19,6 +19,11 @@ JARVIS_WAKE_WORD=on        # opcional: solo escucha tras "Hey Jarvis"
 JARVIS_STT_MODEL=base      # opcional; en español se usa siempre el multilingüe
 ```
 
+Con `JARVIS_STT=auto` (lo recomendado si usas Firefox y Chrome) el servidor ofrece
+la voz local y **la página elige**: Chrome conserva su reconocimiento de siempre y
+Firefox, que no tiene ninguno, usa el local. Con `local`, todos los navegadores
+usan el local.
+
 Reinicia JARVIS. Si falta algún paquete o modelo, JARVIS arranca igual, sigue
 usando el reconocedor del navegador y el preflight dice qué falta.
 

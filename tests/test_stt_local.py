@@ -734,3 +734,40 @@ def test_a_second_page_displaces_the_first_with_its_own_close_code(client, monke
             with pytest.raises(WebSocketDisconnect) as gone:
                 first.receive_json()
             assert gone.value.code == 4001
+
+
+# ── modo auto (Chrome conserva el suyo, Firefox usa el local) ──────────────
+
+def test_auto_is_offered_only_when_whisper_is_importable(monkeypatch):
+    monkeypatch.setenv("JARVIS_STT", "auto")
+    monkeypatch.setattr(stt_local, "_has_module", lambda name: False)
+    assert stt_local.requested_mode() == "auto"
+    assert stt_local.mode() == "browser" and stt_local.offers_local() is False
+    monkeypatch.setattr(stt_local, "_has_module", lambda name: name == "faster_whisper")
+    assert stt_local.mode() == "auto" and stt_local.offers_local() is True
+
+
+def test_the_default_does_not_offer_the_local_recogniser(monkeypatch):
+    monkeypatch.delenv("JARVIS_STT", raising=False)
+    monkeypatch.setattr(stt_local, "_has_module", lambda name: True)
+    assert stt_local.offers_local() is False
+
+
+def test_auto_tells_the_page_to_choose(client, monkeypatch):
+    c, server = client
+    monkeypatch.setenv("JARVIS_STT", "auto")
+    monkeypatch.setattr(stt_local, "_has_module", lambda name: name == "faster_whisper")
+    with c.websocket_connect("/ws/voice") as ws:
+        assert ws.receive_json() == {"type": "config", "muteMicDuringSpeech": False, "stt": "auto"}
+
+
+def test_the_mic_socket_accepts_a_page_in_auto_mode(client, monkeypatch):
+    c, server = client
+    _local_server(monkeypatch)
+    monkeypatch.setenv("JARVIS_STT", "auto")
+    with c.websocket_connect("/ws/mic") as mic:
+        assert mic.receive_json()["type"] == "ready"
+
+
+def test_the_recogniser_is_told_what_a_proper_noun_it_would_miss_looks_like():
+    assert "Jarvis" in stt_local._PROMPTS["es"] and "Jarvis" in stt_local._PROMPTS["en"]
