@@ -29,6 +29,7 @@
  *   Tables, footnotes, HTML blocks. Absent from specs; absent here.
  */
 
+import { t } from "../i18n";
 import { el } from "./ui";
 
 /** Render Markdown into a fresh element. Never returns markup. */
@@ -185,7 +186,7 @@ function listAt(lines: string[], start: number): [HTMLElement, number] {
       const label = el("span", "md-task-text");
       for (const part of inline(task[2])) label.append(part);
       item.append(label);
-      item.setAttribute("aria-label", `${done ? "done" : "not done"}: ${task[2]}`);
+      item.setAttribute("aria-label", `${done ? t("done") : t("not done")}: ${task[2]}`);
     } else {
       for (const part of inline(raw)) item.append(part);
     }

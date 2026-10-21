@@ -5,12 +5,19 @@
  * Slides in from the right with glass-morphism styling.
  */
 
+import { t, unit } from "./i18n";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+/** Which voice answers right now (tts.provider() on the server). */
+type VoiceProvider = "fish" | "piper" | "none";
+
 interface StatusResponse {
   claude_code_installed: boolean;
+  /** Absent on a server that predates the field. */
+  voice_provider?: VoiceProvider;
   server_port: number;
   uptime_seconds: number;
   env_keys_set: {
@@ -56,94 +63,125 @@ async function apiPost<T>(url: string, body: unknown): Promise<T> {
 // Panel HTML
 // ---------------------------------------------------------------------------
 
+/** Escapes a translated phrase for the template below. The catalogue is ours,
+ * but this is HTML built from strings, so nothing goes in unescaped. */
+function h(text: string): string {
+  return text
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/** The voice is Piper (local, free) unless a Fish key says otherwise, so the
+ * Fish key is an OPTION. The red dot and the setup wizard only exist for the
+ * one case that is actually broken: no voice at all. */
+function voiceMissing(status: StatusResponse): boolean {
+  return status.voice_provider
+    ? status.voice_provider === "none"
+    : !status.env_keys_set.fish_audio;
+}
+
 function buildPanelHTML(): string {
   return `
     <div class="settings-backdrop" id="settings-backdrop"></div>
     <div class="settings-panel" id="settings-panel-inner">
       <div class="settings-header">
-        <h2>Settings</h2>
+        <h2>${h(t("Settings"))}</h2>
         <button class="settings-close" id="settings-close">&times;</button>
       </div>
 
       <div class="settings-welcome" id="settings-welcome" style="display:none">
-        <p>Welcome to JARVIS. Let's get you set up.</p>
+        <p>${h(t("Welcome to JARVIS. Let's get you set up."))}</p>
       </div>
 
       <div class="settings-body">
 
         <!-- API Keys -->
         <section class="settings-section" id="section-api-keys">
-          <h3>API Keys</h3>
+          <h3>${h(t("API Keys"))}</h3>
 
           <div class="settings-field">
-            <label>Fish Audio API Key</label>
-            <div class="settings-input-row">
-              <input type="password" id="input-fish-key" placeholder="Fish Audio key..." />
-              <button class="settings-btn" id="btn-test-fish">Test</button>
-              <span class="status-dot" id="status-fish"></span>
+            <label>${h(t("Active voice"))}</label>
+            <div class="status-row">
+              <span class="status-dot" id="status-voice"></span>
+              <span id="voice-provider-text">--</span>
             </div>
+            <p class="settings-restart-notice" id="voice-none-notice" style="display:none; text-align:left">
+              ${h(t("No voice is available. Install the local Piper voice or add a Fish Audio key below."))}
+            </p>
           </div>
 
           <div class="settings-field">
-            <label>Fish Voice ID</label>
+            <label>${h(t("Fish Audio API Key (optional)"))}</label>
+            <div class="settings-input-row">
+              <input type="password" id="input-fish-key" placeholder="${h(t("Fish Audio key..."))}" />
+              <button class="settings-btn" id="btn-test-fish">${h(t("Test"))}</button>
+              <span class="status-dot" id="status-fish"></span>
+            </div>
+            <p class="settings-restart-notice" style="text-align:left">
+              <a id="fish-key-link" href="https://fish.audio/app/api-keys/" target="_blank" rel="noopener noreferrer">${h(t("Get a key at fish.audio"))}</a>
+            </p>
+          </div>
+
+          <div class="settings-field">
+            <label>${h(t("Fish Voice ID"))}</label>
             <div class="settings-input-row">
               <input type="text" id="input-fish-voice-id" placeholder="612b878b113047d9a770c069c8b4fdfe" />
-              <button class="settings-btn" id="btn-save-voice-id">Save</button>
+              <button class="settings-btn" id="btn-save-voice-id">${h(t("Save"))}</button>
             </div>
           </div>
 
           <div class="settings-actions">
-            <button class="settings-btn primary" id="btn-save-keys">Save Keys</button>
+            <button class="settings-btn primary" id="btn-save-keys">${h(t("Save Keys"))}</button>
           </div>
           <p class="settings-restart-notice" id="keys-restart-notice" style="display:none">
-            Saved. Restart the server (menu &rarr; Restart Server) for this to take effect.
+            ${h(t("Saved. Restart the server (menu → Restart Server) for this to take effect."))}
           </p>
         </section>
 
         <!-- Connection Status -->
         <section class="settings-section" id="section-status">
-          <h3>Connection Status</h3>
+          <h3>${h(t("Connection Status"))}</h3>
           <div class="status-grid">
-            <div class="status-row"><span class="status-dot" id="status-claude-cli"></span><span>Claude Code CLI</span></div>
-            <div class="status-row"><span class="status-dot" id="status-server"></span><span>Server</span><span class="status-detail" id="status-server-detail"></span></div>
+            <div class="status-row"><span class="status-dot" id="status-claude-cli"></span><span>${h(t("Claude Code CLI"))}</span></div>
+            <div class="status-row"><span class="status-dot" id="status-server"></span><span>${h(t("Server"))}</span><span class="status-detail" id="status-server-detail"></span></div>
           </div>
         </section>
 
         <!-- User Preferences -->
         <section class="settings-section" id="section-preferences">
-          <h3>User Preferences</h3>
+          <h3>${h(t("User Preferences"))}</h3>
 
           <div class="settings-field">
-            <label>Your Name</label>
-            <input type="text" id="input-user-name" placeholder="Your name" />
+            <label>${h(t("Your Name"))}</label>
+            <input type="text" id="input-user-name" placeholder="${h(t("Your name"))}" />
           </div>
 
           <div class="settings-field">
-            <label>Honorific</label>
+            <label>${h(t("Honorific"))}</label>
             <select id="input-honorific">
-              <option value="sir">Sir</option>
-              <option value="ma'am">Ma'am</option>
-              <option value="none">None</option>
+              <option value="sir">${h(t("Sir"))}</option>
+              <option value="ma'am">${h(t("Ma'am"))}</option>
+              <option value="none">${h(t("None"))}</option>
             </select>
           </div>
 
           <div class="settings-actions">
-            <button class="settings-btn primary" id="btn-save-prefs">Save Preferences</button>
+            <button class="settings-btn primary" id="btn-save-prefs">${h(t("Save Preferences"))}</button>
           </div>
         </section>
 
         <!-- System Info -->
         <section class="settings-section" id="section-sysinfo">
-          <h3>System Info</h3>
+          <h3>${h(t("System Info"))}</h3>
           <div class="sysinfo-grid">
-            <div class="sysinfo-row"><span class="sysinfo-label">Server port</span><span id="sysinfo-port">--</span></div>
-            <div class="sysinfo-row"><span class="sysinfo-label">Uptime</span><span id="sysinfo-uptime">--</span></div>
+            <div class="sysinfo-row"><span class="sysinfo-label">${h(t("Server port"))}</span><span id="sysinfo-port">--</span></div>
+            <div class="sysinfo-row"><span class="sysinfo-label">${h(t("Uptime"))}</span><span id="sysinfo-uptime">--</span></div>
           </div>
         </section>
 
         <!-- Setup Navigation (first-time only) -->
         <div class="setup-nav" id="setup-nav" style="display:none">
-          <button class="settings-btn primary" id="btn-setup-next">Next</button>
+          <button class="settings-btn primary" id="btn-setup-next">${h(t("Next"))}</button>
         </div>
 
       </div>
@@ -171,11 +209,33 @@ function setDotStatus(id: string, status: "green" | "red" | "yellow" | "off") {
 }
 
 function formatUptime(seconds: number): string {
-  if (seconds < 60) return `${Math.floor(seconds)}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return `${h}h ${m}m`;
+  if (seconds < 60) return unit(Math.floor(seconds), "s");
+  if (seconds < 3600) return unit(Math.floor(seconds / 60), "m");
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  return `${unit(hours, "h")} ${unit(mins, "m")}`;
+}
+
+/** Which voice is active, in words, and the notice for the no-voice case. */
+function paintVoice(status: StatusResponse) {
+  const text = document.getElementById("voice-provider-text");
+  const notice = document.getElementById("voice-none-notice");
+  const provider = status.voice_provider;
+  if (provider === "fish") {
+    setDotStatus("status-voice", "green");
+    if (text) text.textContent = t("Fish Audio");
+  } else if (provider === "piper") {
+    setDotStatus("status-voice", "green");
+    if (text) text.textContent = t("Piper (local, free)");
+  } else if (provider === "none") {
+    setDotStatus("status-voice", "red");
+    if (text) text.textContent = t("No voice");
+  } else {
+    // A server that does not say: no claim either way.
+    setDotStatus("status-voice", "off");
+    if (text) text.textContent = "—";
+  }
+  if (notice) notice.style.display = provider === "none" ? "block" : "none";
 }
 
 async function loadStatus() {
@@ -186,10 +246,15 @@ async function loadStatus() {
     setDotStatus("status-server", "green");
 
     const serverDetail = document.getElementById("status-server-detail");
-    if (serverDetail) serverDetail.textContent = `port ${status.server_port} | up ${formatUptime(status.uptime_seconds)}`;
+    if (serverDetail) serverDetail.textContent = t("port {port} | up {uptime}", {
+      port: status.server_port, uptime: formatUptime(status.uptime_seconds),
+    });
 
-    // API key status dots
-    setDotStatus("status-fish", status.env_keys_set.fish_audio ? "green" : "red");
+    // The voice, then the optional Fish key. Fish is red ONLY when there is
+    // no voice at all; with Piper answering, a missing key is not a fault.
+    paintVoice(status);
+    setDotStatus("status-fish",
+      status.env_keys_set.fish_audio ? "green" : voiceMissing(status) ? "red" : "off");
 
     // System info
     const portEl = document.getElementById("sysinfo-port");
@@ -207,8 +272,11 @@ async function loadStatus() {
     setDotStatus("status-server", "red");
     setDotStatus("status-claude-cli", "off");
     setDotStatus("status-fish", "off");
+    setDotStatus("status-voice", "off");
+    const voiceText = document.getElementById("voice-provider-text");
+    if (voiceText) voiceText.textContent = "—";
     const serverDetail = document.getElementById("status-server-detail");
-    if (serverDetail) serverDetail.textContent = "no answer from the server";
+    if (serverDetail) serverDetail.textContent = t("no answer from the server");
     for (const id of ["sysinfo-port", "sysinfo-uptime"]) {
       const node = document.getElementById(id);
       if (node) node.textContent = "—";
@@ -311,8 +379,8 @@ function showSetupStep(step: number) {
 
   const nextBtn = document.getElementById("btn-setup-next");
   if (nextBtn) {
-    if (step === 0) nextBtn.textContent = "Next: Set Your Name";
-    else if (step === 1) nextBtn.textContent = "Finish Setup";
+    if (step === 0) nextBtn.textContent = t("Next: Set Your Name");
+    else if (step === 1) nextBtn.textContent = t("Finish Setup");
     else nextBtn.style.display = "none";
   }
 }
@@ -364,7 +432,7 @@ export async function openSettings() {
   await loadPreferences();
 
   // Check for first-time setup
-  if (status && !status.env_keys_set.fish_audio) {
+  if (status && voiceMissing(status)) {
     enterSetupMode();
   }
 }
@@ -388,7 +456,7 @@ export function isSettingsOpen(): boolean {
 export async function checkFirstTimeSetup(): Promise<boolean> {
   try {
     const status = await apiGet<StatusResponse>("/api/settings/status");
-    if (!status.env_keys_set.fish_audio) {
+    if (voiceMissing(status)) {
       openSettings();
       return true;
     }

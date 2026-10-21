@@ -24,6 +24,7 @@ data/.jarvis_output.txt
 
 # Build
 dist/
+dist-*/
 .vite/
 frontend/.vite/
 

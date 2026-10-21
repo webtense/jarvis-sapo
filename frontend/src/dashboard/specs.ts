@@ -37,6 +37,7 @@ import {
   type SpecProject, type SpecDocument, type SpecDocumentMeta,
   type ReviewState, type ApprovalState, type PlanProgress,
 } from "./api";
+import { t, tp, loc } from "../i18n";
 import { connectSpecsLive } from "./specs-live";
 import { markdown } from "./markdown";
 import { el, row, bar, pill, emptyState, type Tone } from "./ui";
@@ -105,6 +106,20 @@ const APPROVAL: Record<ApprovalState, StateCopy> = {
   },
 };
 
+/** The same copy in the active language. The tables above hold the English
+ * originals, which are the catalogue keys. */
+function inLanguage(copy: StateCopy): StateCopy {
+  return { tone: copy.tone, label: t(copy.label), line: t(copy.line) };
+}
+
+function projectCopy(state: ReviewState): StateCopy {
+  return inLanguage(PROJECT_STATE[state] ?? PROJECT_STATE.building);
+}
+
+function approvalCopy(state: ApprovalState): StateCopy {
+  return inLanguage(APPROVAL[state] ?? APPROVAL.awaiting);
+}
+
 // The dot's SHAPE carries the state with colour switched off, and it is
 // built here rather than through `statusDot` because these four states are
 // not run states: `statusDot` would pick its own tone off the run/session
@@ -124,7 +139,7 @@ function stateDot(state: ReviewState, tone: Tone): HTMLElement {
 
 function fmtWhen(epochSec: number): string {
   if (!epochSec) return "";
-  return new Date(epochSec * 1000).toLocaleString([], {
+  return new Date(epochSec * 1000).toLocaleString(loc(), {
     month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
 }
@@ -150,7 +165,7 @@ function setUnavailable(unavailable: boolean): void {
 // ── Master: the projects, then that project's documents ─────────────────────
 
 function projectRow(project: SpecProject): HTMLElement {
-  const copy = PROJECT_STATE[project.state] ?? PROJECT_STATE.building;
+  const copy = projectCopy(project.state);
   const r = row({
     tone: copy.tone,
     attn: project.state === "awaiting",
@@ -165,13 +180,13 @@ function projectRow(project: SpecProject): HTMLElement {
   // this replaces the state word exactly when the state word alone would
   // leave two rows indistinguishable.
   r.setSub(project.where ? `${project.where} · ${copy.label}` : copy.label);
-  r.addMeta(`${project.documents.length} doc${project.documents.length === 1 ? "" : "s"}`,
+  r.addMeta(tp(project.documents.length, "{n} doc", "{n} docs"),
             { cls: "specs-count" });
   if (project.path === openRoot) r.root.classList.add("is-open");
 
   const progress = project.progress;
   if (progress && progress.total > 0) {
-    const gauge = bar("Tasks", { tone: copy.tone, slim: true });
+    const gauge = bar(t("Tasks"), { tone: copy.tone, slim: true });
     gauge.set((progress.done / progress.total) * 100,
               `${progress.done}/${progress.total}`);
     r.addBody(gauge.root);
@@ -180,15 +195,15 @@ function projectRow(project: SpecProject): HTMLElement {
 }
 
 function documentRow(project: SpecProject, doc: SpecDocumentMeta): HTMLElement {
-  const copy = APPROVAL[doc.approval.state] ?? APPROVAL.awaiting;
+  const copy = approvalCopy(doc.approval.state);
   const r = row({
     tone: copy.tone,
     onOpen: () => selectDocument(project.path, doc.path),
     label: `${doc.title} — ${copy.label}`,
   });
-  r.setLead(pill(doc.kind, doc.kind === "spec" ? "accent" : "idle", "ghost"));
+  r.setLead(pill(t(doc.kind), doc.kind === "spec" ? "accent" : "idle", "ghost"));
   r.setTitle(doc.title);
-  r.setSub(`${doc.sections} section${doc.sections === 1 ? "" : "s"}`);
+  r.setSub(tp(doc.sections, "{n} section", "{n} sections"));
   r.addTrail(pill(copy.label, copy.tone));
   r.addMeta(fmtWhen(doc.modified), { cls: "specs-when" });
   if (doc.path === openPath && project.path === openRoot) {
@@ -212,7 +227,7 @@ function paintBadge(): void {
     (p) => p.state === "awaiting" || p.state === "review").length;
   badge.hidden = waiting === 0;
   badge.textContent = String(waiting);
-  badge.setAttribute("aria-label", `${waiting} waiting on you`);
+  badge.setAttribute("aria-label", t("{n} waiting on you", { n: waiting }));
 }
 
 function paintMaster(): void {
@@ -224,9 +239,9 @@ function paintMaster(): void {
   if (meta) meta.textContent = projects.length ? String(projects.length) : "";
 
   if (projects.length === 0) {
-    list.append(emptyState(
+    list.append(emptyState(t(
       "Nothing to review yet. Talk an idea through with JARVIS and the "
-      + "design he writes down will appear here."));
+      + "design he writes down will appear here.")));
   } else {
     for (const project of projects) list.append(projectRow(project));
   }
@@ -248,14 +263,14 @@ function paintMaster(): void {
 
 /** The band at the top of the document: what state it is in, in words. */
 function statusBand(doc: SpecDocument): HTMLElement {
-  const copy = APPROVAL[doc.approval.state] ?? APPROVAL.awaiting;
+  const copy = approvalCopy(doc.approval.state);
   const band = el("div", `specs-band tone-${copy.tone}`);
 
   const head = el("div", "specs-band-head");
   head.append(pill(copy.label, copy.tone));
   if (doc.approval.state !== "awaiting" && doc.approval.approved_at) {
     head.append(el("span", "specs-band-when",
-                   `approved ${fmtWhen(doc.approval.approved_at)}`));
+                   t("approved {when}", { when: fmtWhen(doc.approval.approved_at) })));
   }
   band.append(head, el("p", "specs-band-line", copy.line));
 
@@ -275,17 +290,17 @@ function statusBand(doc: SpecDocument): HTMLElement {
 function progressBlock(progress: PlanProgress): HTMLElement {
   const done = progress.done >= progress.total;
   const wrap = el("div", "specs-progress");
-  const gauge = bar("Tasks done", { tone: done ? "ok" : "accent" });
+  const gauge = bar(t("Tasks done"), { tone: done ? "ok" : "accent" });
   gauge.set((progress.done / progress.total) * 100,
-            `${progress.done} of ${progress.total}`);
+            t("{done} of {total}", { done: progress.done, total: progress.total }));
   wrap.append(gauge.root);
 
   if (done) {
     wrap.append(el("p", "specs-progress-note",
-                   "Every task ticked. This is the work to review."));
+                   t("Every task ticked. This is the work to review.")));
   } else if (progress.current) {
     const note = el("p", "specs-progress-note");
-    note.append(el("span", "specs-progress-now", "Now"));
+    note.append(el("span", "specs-progress-now", t("Now")));
     if (progress.current_section) {
       note.append(el("span", "specs-jump-num",
                      String(progress.current_section).padStart(2, "0")));
@@ -293,7 +308,9 @@ function progressBlock(progress: PlanProgress): HTMLElement {
     note.append(document.createTextNode(` ${progress.current}`));
     if (progress.steps_total > 0) {
       note.append(el("span", "specs-progress-steps",
-                     `${progress.steps_done}/${progress.steps_total} steps`));
+                     t("{done}/{total} steps", {
+                       done: progress.steps_done, total: progress.steps_total,
+                     })));
     }
     wrap.append(note);
   }
@@ -334,10 +351,10 @@ function paintDetail(doc: SpecDocument | null, message?: string): void {
 
   if (doc === null) {
     paintedKey = null;
-    title.textContent = "Document";
+    title.textContent = t("Document");
     if (meta) meta.textContent = "";
     body.replaceChildren(emptyState(
-      message ?? "Pick a project on the left to read what JARVIS wrote."));
+      message ?? t("Pick a project on the left to read what JARVIS wrote.")));
     return;
   }
 
@@ -347,18 +364,18 @@ function paintDetail(doc: SpecDocument | null, message?: string): void {
 
   title.textContent = doc.title;
   if (meta) {
-    meta.textContent = `${doc.kind} · ${doc.sections.length} section`
-      + `${doc.sections.length === 1 ? "" : "s"}`;
+    meta.textContent = `${t(doc.kind)} · `
+      + tp(doc.sections.length, "{n} section", "{n} sections");
   }
 
   const parts: Node[] = [statusBand(doc)];
 
   // The instruction, once, at the top. It is not decoration: without it the
   // numbers look like ornament instead of the way to talk about the page.
-  parts.push(el("p", "specs-howto",
+  parts.push(el("p", "specs-howto", t(
     "Say a number to talk about a section — “read me three”, "
     + "“change five”, “drop the last one”. Say "
-    + "“approved” when it is right."));
+    + "“approved” when it is right.")));
 
   parts.push(el("p", "specs-path", doc.path));
 
@@ -368,7 +385,7 @@ function paintDetail(doc: SpecDocument | null, message?: string): void {
 
   if (doc.sections.length === 0) {
     parts.push(emptyState(
-      "This document has no headings, so there is nothing to number yet.",
+      t("This document has no headings, so there is nothing to number yet."),
       true));
   } else {
     const list = el("div", "specs-sections");
@@ -423,9 +440,9 @@ async function loadDocument(): Promise<void> {
     if (!(e instanceof ApiError && e.status === 404)) {
       console.error("[specs] document fetch failed", e);
     }
-    paintDetail(null,
+    paintDetail(null, t(
       "Could not read that document. It may have been moved or renamed on "
-      + "disk — JARVIS rewrites these files as you talk.");
+      + "disk — JARVIS rewrites these files as you talk."));
   }
 }
 
@@ -442,7 +459,7 @@ async function reconcile(): Promise<void> {
       return;
     }
     console.error("[specs] reconcile failed", e);
-    showBanner("Cannot reach the JARVIS server.");
+    showBanner(t("Cannot reach the JARVIS server."));
     return;
   }
 
@@ -480,7 +497,7 @@ export function initSpecs(): void {
   connectSpecsLive({
     onReconcile: () => void reconcile(),
     onConnectionChange: (connected) => {
-      if (!connected) showBanner("Reconnecting to JARVIS…");
+      if (!connected) showBanner(t("Reconnecting to JARVIS…"));
     },
   });
 }

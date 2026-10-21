@@ -12,36 +12,36 @@
       <div class="shell-head-top">
         <div class="brand">
           <span class="brand-mark">JARVIS</span>
-          <span class="brand-sub">Run Control</span>
+          <span class="brand-sub" data-i18n>Run Control</span>
         </div>
         <div id="link-state" class="link-state tone-ok">
           <span class="dot dot--done tone-ok" aria-hidden="true"></span>
-          <span id="link-state-text">Link OK</span>
+          <span id="link-state-text" data-i18n>Link OK</span>
         </div>
         <div id="stats" class="shell-stats"></div>
       </div>
 
       <nav id="view-tabs" class="tabs shell-tabs" role="tablist">
-        <button id="tab-runs" class="tab active" data-view="runs"
+        <button id="tab-runs" class="tab active" data-view="runs" data-i18n
                 role="tab" aria-selected="true">Runs</button>
-        <button id="tab-sessions" class="tab" data-view="sessions"
+        <button id="tab-sessions" class="tab" data-view="sessions" data-i18n
                 role="tab" aria-selected="false">
           Sessions
           <span id="sessions-badge" class="tab-badge" hidden></span>
         </button>
-        <button id="tab-memory" class="tab" data-view="memory"
+        <button id="tab-memory" class="tab" data-view="memory" data-i18n
                 role="tab" aria-selected="false">Memory</button>
-        <button id="tab-specs" class="tab" data-view="specs"
+        <button id="tab-specs" class="tab" data-view="specs" data-i18n
                 role="tab" aria-selected="false">
           Specs
           <span id="specs-tab-badge" class="tab-badge" hidden></span>
         </button>
-        <button id="tab-projects" class="tab" data-view="projects"
+        <button id="tab-projects" class="tab" data-view="projects" data-i18n
                 role="tab" aria-selected="false">
           Projects
           <span id="projects-tab-badge" class="tab-badge" hidden></span>
         </button>
-        <button id="tab-usage" class="tab" data-view="usage"
+        <button id="tab-usage" class="tab" data-view="usage" data-i18n
                 role="tab" aria-selected="false">Usage</button>
       </nav>
     </header>
@@ -53,7 +53,7 @@
              entirely when there is nothing wrong. -->
         <section id="attention-section" class="panel panel--alert tone-bad" hidden>
           <header class="panel-head">
-            <h2 class="panel-title">Needs Attention</h2>
+            <h2 class="panel-title" data-i18n>Needs Attention</h2>
             <span id="attention-meta" class="panel-meta"></span>
           </header>
           <div class="panel-body">
@@ -63,7 +63,7 @@
 
         <section id="active-section" class="panel">
           <header class="panel-head">
-            <h2 class="panel-title">Active</h2>
+            <h2 class="panel-title" data-i18n>Active</h2>
             <span id="active-meta" class="panel-meta"></span>
           </header>
           <div class="panel-body">
@@ -73,7 +73,7 @@
 
         <section id="history-section" class="panel">
           <header class="panel-head">
-            <h2 class="panel-title">History</h2>
+            <h2 class="panel-title" data-i18n>History</h2>
             <span id="history-meta" class="panel-meta"></span>
           </header>
           <div class="panel-body">
@@ -88,14 +88,14 @@
       <!-- ── MEMORY ──────────────────────────────────────────────────────── -->
       <div id="memory-view" class="view" hidden>
         <div id="memory-banner" class="empty" hidden></div>
-        <div id="memory-unavailable" class="empty" hidden>
+        <div id="memory-unavailable" class="empty" hidden data-i18n>
           Memory view isn't available yet — the backend endpoint hasn't shipped.
         </div>
 
         <div id="memory-body" class="view">
           <section id="memory-path-section" class="panel">
             <header class="panel-head">
-              <h2 class="panel-title">On Disk</h2>
+              <h2 class="panel-title" data-i18n>On Disk</h2>
             </header>
             <div class="panel-body">
               <div id="memory-path"></div>
@@ -104,7 +104,7 @@
 
           <section id="journal-latest-section" class="panel tone-accent" hidden>
             <header class="panel-head">
-              <h2 class="panel-title">Latest Handover</h2>
+              <h2 class="panel-title" data-i18n>Latest Handover</h2>
               <span id="journal-latest-meta" class="panel-meta"></span>
             </header>
             <div class="panel-body">
@@ -114,7 +114,7 @@
 
           <section id="memory-index-section" class="panel">
             <header class="panel-head">
-              <h2 class="panel-title">Carried Into Every Conversation</h2>
+              <h2 class="panel-title" data-i18n>Carried Into Every Conversation</h2>
               <span id="memory-index-meta" class="panel-meta"></span>
             </header>
             <div class="panel-body">
@@ -124,7 +124,7 @@
 
           <section id="memory-files-section" class="panel">
             <header class="panel-head">
-              <h2 class="panel-title">Memories</h2>
+              <h2 class="panel-title" data-i18n>Memories</h2>
               <span id="memory-files-meta" class="panel-meta"></span>
             </header>
             <div class="panel-body">
@@ -134,7 +134,7 @@
 
           <section id="memory-projects-section" class="panel">
             <header class="panel-head">
-              <h2 class="panel-title">Projects</h2>
+              <h2 class="panel-title" data-i18n>Projects</h2>
               <span id="memory-projects-meta" class="panel-meta"></span>
             </header>
             <div class="panel-body">
@@ -144,7 +144,7 @@
 
           <section id="memory-journal-section" class="panel">
             <header class="panel-head">
-              <h2 class="panel-title">Journal</h2>
+              <h2 class="panel-title" data-i18n>Journal</h2>
               <span id="memory-journal-meta" class="panel-meta"></span>
             </header>
             <div class="panel-body">
@@ -161,7 +161,7 @@
           <div class="split-master split-stick">
             <section class="panel">
               <header class="panel-head">
-                <h2 class="panel-title">Projects</h2>
+                <h2 class="panel-title" data-i18n>Projects</h2>
                 <span id="proj-list-meta" class="panel-meta"></span>
               </header>
               <div class="panel-body">
@@ -179,7 +179,7 @@
            input: the numbers beside the sections ARE the input, spoken. -->
       <div id="specs-view" class="view" hidden>
         <div id="specs-banner" class="empty" hidden></div>
-        <div id="specs-unavailable" class="empty" hidden>
+        <div id="specs-unavailable" class="empty" hidden data-i18n>
           The review surface isn't available — the server didn't answer
           /api/specs.
         </div>
@@ -188,7 +188,7 @@
           <div class="split-master">
             <section id="specs-projects-section" class="panel">
               <header class="panel-head">
-                <h2 class="panel-title">Under Review</h2>
+                <h2 class="panel-title" data-i18n>Under Review</h2>
                 <span id="specs-projects-meta" class="panel-meta"></span>
               </header>
               <div class="panel-body">
@@ -198,7 +198,7 @@
 
             <section id="specs-docs-section" class="panel" hidden>
               <header class="panel-head">
-                <h2 class="panel-title">Documents</h2>
+                <h2 class="panel-title" data-i18n>Documents</h2>
                 <span id="specs-docs-meta" class="panel-meta"></span>
               </header>
               <div class="panel-body">
@@ -210,7 +210,7 @@
           <div class="split-detail split-stick">
             <section id="specs-detail" class="panel panel--flush">
               <header class="panel-head">
-                <h2 id="specs-doc-title" class="panel-title">Document</h2>
+                <h2 id="specs-doc-title" class="panel-title" data-i18n>Document</h2>
                 <span id="specs-doc-meta" class="panel-meta"></span>
               </header>
               <div id="specs-doc-body" class="panel-body specs-doc"></div>

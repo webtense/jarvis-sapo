@@ -15,6 +15,8 @@
  * position (the row's left rail), so nothing depends on colour alone.
  */
 
+import { t, tp, fmtInt } from "../i18n";
+
 export type Tone = "accent" | "ok" | "warn" | "bad" | "idle" | "dim";
 
 /** Shorthand for the createElement/className/textContent triple. */
@@ -69,7 +71,12 @@ const STATE_STYLE: Record<string, StateStyle> = {
 };
 
 export function stateStyle(state: string): StateStyle {
-  return STATE_STYLE[state] ?? { tone: "idle", shape: "void", label: state };
+  // The word is translated here, once, so every caller (pill, aria-label,
+  // list of counts) gets it in the active language. A state this table does
+  // not know comes from the server and is shown as it arrived.
+  const known = STATE_STYLE[state];
+  if (!known) return { tone: "idle", shape: "void", label: state };
+  return { ...known, label: t(known.label) };
 }
 
 /** The state glyph. Shape distinguishes the state with colour switched off. */
@@ -222,7 +229,7 @@ export function bar(label: string, opts: {
       valueEl.textContent = valueText ?? `${Math.round(clamped)}%`;
     },
     unknown(valueText?: string) {
-      const text = valueText ?? "not measured";
+      const text = valueText ?? t("not measured");
       root.classList.add("bar--unknown");
       root.classList.remove("bar--indeterminate");
       // No aria-valuenow at all: a screen reader must not be told a number
@@ -628,7 +635,7 @@ export function sparkline(label: string, opts: {
       if (n === 0) {
         root.classList.add("spark--empty");
         svg.removeAttribute("aria-label");
-        range.textContent = "no history";
+        range.textContent = t("no history");
         return;
       }
       root.classList.remove("spark--empty");
@@ -653,14 +660,15 @@ export function sparkline(label: string, opts: {
         rect.setAttribute("width", String(slot - 1));
         rect.setAttribute("height", String(h || 1));
         const tip = document.createElementNS(NS, "title");
-        tip.textContent = `${p.label}: ${p.value.toLocaleString()}`;
+        tip.textContent = `${p.label}: ${fmtInt(p.value)}`;
         rect.append(tip);
         svg.append(rect);
       }
-      svg.setAttribute(
-        "aria-label",
-        `${label}: ${n} day${n === 1 ? "" : "s"} to ${points[n - 1].label}, `
-        + `highest ${points[peakAt].value.toLocaleString()} on ${points[peakAt].label}`);
+      svg.setAttribute("aria-label", t(
+        "{label}: {days} to {last}, highest {peak} on {peakDay}", {
+          label, days: tp(n, "{n} day", "{n} days"), last: points[n - 1].label,
+          peak: fmtInt(points[peakAt].value), peakDay: points[peakAt].label,
+        }));
       range.textContent = n === 1 ? points[0].label
         : `${points[0].label} — ${points[n - 1].label}`;
     },

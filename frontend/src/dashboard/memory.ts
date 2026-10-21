@@ -17,6 +17,7 @@ import {
   type MemorySnapshot, type MemoryKind,
   type MemoryIndexEntry, type MemoryFileEntry, type ProjectNoteEntry, type JournalEntry,
 } from "./api";
+import { t, loc } from "../i18n";
 import { el, row, button, emptyState } from "./ui";
 
 let started = false;
@@ -24,7 +25,7 @@ let openDocToken = 0;
 
 function fmtWhen(epochSec: number): string {
   if (!epochSec) return "—";
-  return new Date(epochSec * 1000).toLocaleString([], {
+  return new Date(epochSec * 1000).toLocaleString(loc(), {
     month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
 }
@@ -82,13 +83,13 @@ function openDoc(kind: MemoryKind, slug: string, titleText: string): void {
   pane.replaceChildren();
 
   const head = el("header", "pane-head");
-  const close = button("Close", closeDoc, { quiet: true });
+  const close = button(t("Close"), closeDoc, { quiet: true });
   close.classList.add("pane-close");
   head.append(el("h2", "pane-title", titleText), close);
 
   const body = el("div", "pane-body");
-  const doc = el("pre", "doc", "Loading…");
-  body.append(el("div", "pane-meta", `${kind} · ${slug}`), doc);
+  const doc = el("pre", "doc", t("Loading…"));
+  body.append(el("div", "pane-meta", `${t(kind)} · ${slug}`), doc);
 
   pane.append(head, body);
 
@@ -102,7 +103,7 @@ function openDoc(kind: MemoryKind, slug: string, titleText: string): void {
       if (!(e instanceof ApiError && e.status === 404)) {
         console.error("[memory] doc fetch failed", e);
       }
-      doc.textContent = "Could not load this file. It may have been moved or deleted on disk.";
+      doc.textContent = t("Could not load this file. It may have been moved or deleted on disk.");
     });
 }
 
@@ -120,10 +121,10 @@ function paintPath(path: string): void {
   holder.replaceChildren();
 
   const code = el("code", "memory-path-value", path);
-  const copy = button("Copy path", () => {
+  const copy = button(t("Copy path"), () => {
     navigator.clipboard?.writeText(path).then(
-      () => { copy.textContent = "Copied"; setTimeout(() => { copy.textContent = "Copy path"; }, 1500); },
-      () => { copy.textContent = "Could not copy"; setTimeout(() => { copy.textContent = "Copy path"; }, 1500); },
+      () => { copy.textContent = t("Copied"); setTimeout(() => { copy.textContent = t("Copy path"); }, 1500); },
+      () => { copy.textContent = t("Could not copy"); setTimeout(() => { copy.textContent = t("Copy path"); }, 1500); },
     );
   });
 
@@ -131,7 +132,7 @@ function paintPath(path: string): void {
   pathRow.append(code, copy);
 
   holder.append(
-    el("div", "memory-hint", "Plain Markdown on disk. Edit it directly — JARVIS reads it fresh every conversation."),
+    el("div", "memory-hint", t("Plain Markdown on disk. Edit it directly — JARVIS reads it fresh every conversation.")),
     pathRow,
   );
 }
@@ -142,7 +143,7 @@ function paintIndex(entries: MemoryIndexEntry[]): void {
   list.replaceChildren();
   setMeta("memory-index-meta", entries.length);
   if (entries.length === 0) {
-    list.append(emptyState("Nothing indexed yet.", true));
+    list.append(emptyState(t("Nothing indexed yet."), true));
     return;
   }
   for (const entry of entries) {
@@ -159,7 +160,7 @@ function paintMemories(entries: MemoryFileEntry[]): void {
   list.replaceChildren();
   setMeta("memory-files-meta", entries.length);
   if (entries.length === 0) {
-    list.append(emptyState("No memory files yet.", true));
+    list.append(emptyState(t("No memory files yet."), true));
     return;
   }
   const sorted = [...entries].sort((a, b) => b.modified - a.modified);
@@ -177,7 +178,7 @@ function paintProjects(entries: ProjectNoteEntry[]): void {
   list.replaceChildren();
   setMeta("memory-projects-meta", entries.length);
   if (entries.length === 0) {
-    list.append(emptyState("No project notes yet.", true));
+    list.append(emptyState(t("No project notes yet."), true));
     return;
   }
   const sorted = [...entries].sort((a, b) => b.modified - a.modified);
@@ -195,14 +196,14 @@ function paintJournalList(entries: JournalEntry[], latestSlug: string | null): v
   list.replaceChildren();
   setMeta("memory-journal-meta", entries.length);
   if (entries.length === 0) {
-    list.append(emptyState("No journal entries yet.", true));
+    list.append(emptyState(t("No journal entries yet."), true));
     return;
   }
   const sorted = [...entries].sort((a, b) => b.when - a.when);
   for (const j of sorted) {
     const isLatest = j.slug === latestSlug;
     list.append(docRow(
-      j.reason || "(handover)", j.slug, fmtWhen(j.when),
+      j.reason || t("(handover)"), j.slug, fmtWhen(j.when),
       () => openDoc("journal", j.slug, j.reason || j.slug),
       isLatest,
     ));
@@ -221,7 +222,7 @@ async function paintLatestJournal(latestSlug: string | null): Promise<void> {
   }
   wrap.hidden = false;
   if (meta) meta.textContent = latestSlug;
-  body.textContent = "Loading…";
+  body.textContent = t("Loading…");
   try {
     const doc = await getMemoryDoc("journal", latestSlug);
     body.textContent = doc.text;
@@ -229,7 +230,7 @@ async function paintLatestJournal(latestSlug: string | null): Promise<void> {
     if (!(e instanceof ApiError && e.status === 404)) {
       console.error("[memory] latest journal fetch failed", e);
     }
-    body.textContent = "Could not load the latest journal entry.";
+    body.textContent = t("Could not load the latest journal entry.");
   }
 }
 
@@ -246,7 +247,7 @@ async function reconcile(): Promise<void> {
       return;
     }
     console.error("[memory] reconcile failed", e);
-    showBanner("Cannot reach the JARVIS server.");
+    showBanner(t("Cannot reach the JARVIS server."));
     return;
   }
 
