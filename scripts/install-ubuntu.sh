@@ -46,6 +46,61 @@ VOICE="${PIPER_VOICE:-$DEFAULT_VOICE}"
 [[ -f "data/voices/$VOICE.onnx" ]] || \
   .venv/bin/python -m piper.download_voices --download-dir data/voices "$VOICE"
 
+# Más voces de salida (opcional). Ver docs/voz.md para la comparativa.
+#
+#   JARVIS_INSTALL_VOICES=1  descarga voces Piper adicionales (~60-115 MB cada
+#                            una): es_MX-claude-high y es_ES-sharvard-medium en
+#                            castellano; en_GB-northern_english_male-medium en inglés.
+#   JARVIS_INSTALL_KOKORO=1  instala kokoro-onnx y el modelo cuantizado de Kokoro
+#                            (~120 MB, local). Se activa en Ajustes o con
+#                            JARVIS_TTS_PROVIDER=kokoro.
+#   JARVIS_INSTALL_EDGE=1    instala edge-tts. Es una voz en la NUBE: el texto de
+#                            cada frase sale hacia Microsoft. Nunca la elige
+#                            `auto`; solo con JARVIS_TTS_PROVIDER=edge (o en Ajustes).
+#
+# Ninguna cambia la voz que ya tienes: se eligen después.
+if [[ "${JARVIS_INSTALL_VOICES:-0}" == "1" ]]; then
+  echo "==> Voces Piper adicionales"
+  case "$LANGUAGE" in
+    es*) EXTRA_VOICES="es_MX-claude-high es_ES-sharvard-medium" ;;
+    *)   EXTRA_VOICES="en_GB-northern_english_male-medium" ;;
+  esac
+  for extra in $EXTRA_VOICES; do
+    [[ -f "data/voices/$extra.onnx" ]] || \
+      .venv/bin/python -m piper.download_voices --download-dir data/voices "$extra"
+  done
+fi
+
+if [[ "${JARVIS_INSTALL_KOKORO:-0}" == "1" ]]; then
+  echo "==> Kokoro (voz local opcional)"
+  .venv/bin/pip install --quiet kokoro-onnx
+  KOKORO_URL="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+  mkdir -p data/voices/kokoro
+  # Suma de comprobación fija: si el fichero descargado no es el que se midió, se borra.
+  declare -A KOKORO_SHA=(
+    [kokoro-v1.0.int8.onnx]=6e742170d309016e5891a994e1ce1559c702a2ccd0075e67ef7157974f6406cb
+    [voices-v1.0.bin]=bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d
+  )
+  for f in "${!KOKORO_SHA[@]}"; do
+    if [[ ! -f "data/voices/kokoro/$f" ]]; then
+      curl -fL --retry 3 -o "data/voices/kokoro/$f.part" "$KOKORO_URL/$f"
+      if echo "${KOKORO_SHA[$f]}  data/voices/kokoro/$f.part" | sha256sum -c --quiet -; then
+        mv "data/voices/kokoro/$f.part" "data/voices/kokoro/$f"
+      else
+        rm -f "data/voices/kokoro/$f.part"
+        echo "ERROR: $f no coincide con la suma de comprobación esperada; descartado." >&2
+        exit 1
+      fi
+    fi
+  done
+fi
+
+if [[ "${JARVIS_INSTALL_EDGE:-0}" == "1" ]]; then
+  echo "==> Edge TTS (voz en la NUBE, opcional)"
+  .venv/bin/pip install --quiet edge-tts
+  echo "AVISO: con esta voz el texto de cada frase sale hacia Microsoft. Solo se usa si la eliges." >&2
+fi
+
 # Reconocimiento de voz LOCAL y palabra de activación (opcional, desactivado).
 # Uso: JARVIS_INSTALL_STT=1 scripts/install-ubuntu.sh
 # Instala faster-whisper y openWakeWord y descarga los modelos (~150 MB el

@@ -12,12 +12,35 @@ import { t, unit } from "./i18n";
 // ---------------------------------------------------------------------------
 
 /** Which voice answers right now (tts.provider() on the server). */
-type VoiceProvider = "fish" | "piper" | "none";
+type VoiceProvider = "fish" | "piper" | "kokoro" | "edge" | "none";
+
+/** One provider in the picker (tts.status() on the server). */
+interface VoiceProviderInfo {
+  id: "fish" | "piper" | "kokoro" | "edge";
+  available: boolean;
+  /** The text of every sentence leaves the machine. */
+  cloud: boolean;
+  voices: string[];
+  /** The voice it would use now. */
+  voice: string;
+}
+
+interface VoiceStatus {
+  /** What JARVIS_TTS_PROVIDER asks for: "auto" or a provider id or "none". */
+  wanted: string;
+  /** The voice the NEXT sentence is really said with. */
+  in_use: VoiceProvider;
+  providers: VoiceProviderInfo[];
+}
 
 interface StatusResponse {
   claude_code_installed: boolean;
   /** Absent on a server that predates the field. */
   voice_provider?: VoiceProvider;
+  /** Absent on a server that predates the picker. */
+  voice?: VoiceStatus;
+  /** A sentence (already in the language) when the voice is failing, or "". */
+  voice_notice?: string;
   server_port: number;
   uptime_seconds: number;
   env_keys_set: {
@@ -42,6 +65,10 @@ let isFirstTimeSetup = false;
 let setupStep = 0; // 0=fish, 1=name, 2=done
 /** The last status the server gave, so "Test" can tell whether there is a saved key. */
 let lastStatus: StatusResponse | null = null;
+/** The picker has a change that is not saved: do not repaint it under the user. */
+let voicePickerDirty = false;
+let lastVoice: VoiceStatus | null = null;
+let testAudio: HTMLAudioElement | null = null;
 
 // ---------------------------------------------------------------------------
 // API helpers
@@ -110,6 +137,20 @@ function buildPanelHTML(): string {
             <p class="settings-restart-notice" id="voice-none-notice" style="display:none; text-align:left">
               ${h(t("No voice is available. Install the local Piper voice or add a Fish Audio key below."))}
             </p>
+            <p class="settings-restart-notice" id="voice-fish-notice" style="display:none; text-align:left"></p>
+          </div>
+
+          <div class="settings-field" id="voice-picker" style="display:none">
+            <label for="select-voice-provider">${h(t("Voice engine"))}</label>
+            <select id="select-voice-provider"></select>
+            <label for="select-voice-name" id="label-voice-name">${h(t("Voice"))}</label>
+            <select id="select-voice-name"></select>
+            <p class="settings-restart-notice" id="voice-cloud-warning" style="display:none; text-align:left"></p>
+            <div class="settings-input-row">
+              <button class="settings-btn" id="btn-test-voice">${h(t("Test voice"))}</button>
+              <button class="settings-btn primary" id="btn-save-voice">${h(t("Save voice"))}</button>
+            </div>
+            <p class="settings-restart-notice" id="voice-picker-result" style="display:none; text-align:left"></p>
           </div>
 
           <div class="settings-field">
@@ -218,17 +259,28 @@ function formatUptime(seconds: number): string {
   return `${unit(hours, "h")} ${unit(mins, "m")}`;
 }
 
+/** The name of a voice engine, as the page shows it. */
+function providerLabel(id: string): string {
+  switch (id) {
+    case "fish": return t("Fish Audio");
+    case "piper": return t("Piper (local, free)");
+    case "kokoro": return t("Kokoro (local, free)");
+    case "edge": return t("Edge (cloud, Microsoft)");
+    case "none": return t("No voice");
+    default: return t("Automatic");
+  }
+}
+
 /** Which voice is active, in words, and the notice for the no-voice case. */
 function paintVoice(status: StatusResponse) {
   const text = document.getElementById("voice-provider-text");
   const notice = document.getElementById("voice-none-notice");
-  const provider = status.voice_provider;
-  if (provider === "fish") {
+  // The engine the next sentence really uses; an older server only says what
+  // it chose.
+  const provider = status.voice?.in_use ?? status.voice_provider;
+  if (provider === "fish" || provider === "piper" || provider === "kokoro" || provider === "edge") {
     setDotStatus("status-voice", "green");
-    if (text) text.textContent = t("Fish Audio");
-  } else if (provider === "piper") {
-    setDotStatus("status-voice", "green");
-    if (text) text.textContent = t("Piper (local, free)");
+    if (text) text.textContent = providerLabel(provider);
   } else if (provider === "none") {
     setDotStatus("status-voice", "red");
     if (text) text.textContent = t("No voice");
@@ -238,6 +290,149 @@ function paintVoice(status: StatusResponse) {
     if (text) text.textContent = "—";
   }
   if (notice) notice.style.display = provider === "none" ? "block" : "none";
+
+  // Fish configured but failing (or Edge): what the server says, as text.
+  const failing = document.getElementById("voice-fish-notice");
+  if (failing) {
+    failing.textContent = status.voice_notice ?? "";
+    failing.style.display = status.voice_notice ? "block" : "none";
+  }
+}
+
+function pickerProvider(): string {
+  return (document.getElementById("select-voice-provider") as HTMLSelectElement | null)?.value ?? "auto";
+}
+
+function addOption(select: HTMLSelectElement, value: string, label: string) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  select.appendChild(option);
+}
+
+/** The voices of the engine picked, the cloud warning and the buttons. */
+function paintVoiceChoice() {
+  const voices = document.getElementById("select-voice-name") as HTMLSelectElement | null;
+  const label = document.getElementById("label-voice-name");
+  const warning = document.getElementById("voice-cloud-warning");
+  const test = document.getElementById("btn-test-voice") as HTMLButtonElement | null;
+  if (!voices || !lastVoice) return;
+  const id = pickerProvider();
+  const info = lastVoice.providers.find((p) => p.id === id);
+  const previous = voices.value;
+  voices.replaceChildren();
+  const names = info ? info.voices : [];
+  for (const name of names) addOption(voices, name, name);
+  // Keep the user's pick if the list still has it, else the voice in use.
+  if (previous && names.includes(previous)) voices.value = previous;
+  else if (info && names.includes(info.voice)) voices.value = info.voice;
+  const hasVoices = names.length > 1;
+  voices.style.display = hasVoices ? "" : "none";
+  if (label) label.style.display = hasVoices ? "" : "none";
+  if (warning) {
+    let message = "";
+    if (id === "edge") {
+      message = t("Cloud voice: the text of every sentence is sent to Microsoft. It is an unofficial service that may stop working; Piper takes over if it fails.");
+    } else if (id === "fish") {
+      message = t("Cloud voice: the text of every sentence is sent to Fish Audio.");
+    }
+    warning.textContent = message;
+    warning.style.display = message ? "block" : "none";
+  }
+  if (test) test.disabled = id === "none";
+}
+
+/** Fills the engine list with what is installed. Skipped while there is an
+ * unsaved change, so a status refresh does not undo the user's choice. */
+function paintVoicePicker(status: StatusResponse) {
+  const picker = document.getElementById("voice-picker");
+  const select = document.getElementById("select-voice-provider") as HTMLSelectElement | null;
+  if (!picker || !select) return;
+  if (!status.voice) {
+    picker.style.display = "none";            // a server that predates the picker
+    return;
+  }
+  picker.style.display = "";
+  lastVoice = status.voice;
+  if (voicePickerDirty) return;
+  select.replaceChildren();
+  addOption(select, "auto", providerLabel("auto"));
+  for (const p of status.voice.providers) {
+    if (p.available) addOption(select, p.id, providerLabel(p.id));
+  }
+  addOption(select, "none", providerLabel("none"));
+  const wanted = status.voice.wanted;
+  select.value = Array.from(select.options).some((o) => o.value === wanted) ? wanted : "auto";
+  paintVoiceChoice();
+}
+
+function showPickerResult(message: string) {
+  const out = document.getElementById("voice-picker-result");
+  if (!out) return;
+  out.textContent = message;
+  out.style.display = message ? "block" : "none";
+}
+
+/** Plays the audio a voice test returned. The bytes are data, not markup:
+ * they go to an <audio> element through a blob, never into the page. */
+async function playTest(base64: string, mime: string): Promise<void> {
+  const raw = atob(base64);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+  if (testAudio) testAudio.pause();
+  const audio = new Audio(url);
+  testAudio = audio;
+  const release = () => URL.revokeObjectURL(url);
+  audio.addEventListener("ended", release);
+  audio.addEventListener("error", release);
+  await audio.play();
+}
+
+async function testVoice() {
+  const button = document.getElementById("btn-test-voice") as HTMLButtonElement | null;
+  if (button) button.disabled = true;
+  showPickerResult(t("Testing the voice..."));
+  try {
+    const voiceSelect = document.getElementById("select-voice-name") as HTMLSelectElement | null;
+    const voice = voiceSelect && voiceSelect.style.display !== "none" ? voiceSelect.value : "";
+    const result = await apiPost<{ audio: string | null; mime?: string; error?: string; seconds?: number }>(
+      "/api/settings/voice-test", { provider: pickerProvider(), voice });
+    if (result.audio) {
+      showPickerResult(t("Playing the test phrase."));
+      await playTest(result.audio, result.mime || "audio/wav");
+    } else {
+      showPickerResult(result.error || t("That voice did not answer"));
+    }
+  } catch (e) {
+    console.error("[settings] voice test failed:", e);
+    showPickerResult(t("That voice did not answer"));
+  } finally {
+    if (button) button.disabled = pickerProvider() === "none";
+  }
+}
+
+async function saveVoice() {
+  const voiceSelect = document.getElementById("select-voice-name") as HTMLSelectElement | null;
+  const voice = voiceSelect && voiceSelect.style.display !== "none" ? voiceSelect.value : "";
+  try {
+    const res = await fetch("/api/settings/voice", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: pickerProvider(), voice }),
+    });
+    const body = await res.json() as { success?: boolean; error?: string };
+    if (!res.ok || !body.success) {
+      showPickerResult(body.error || t("That voice could not be saved"));
+      return;
+    }
+    voicePickerDirty = false;
+    showPickerResult(t("Saved. It applies from the next sentence."));
+    await loadStatus();
+  } catch (e) {
+    console.error("[settings] voice save failed:", e);
+    showPickerResult(t("That voice could not be saved"));
+  }
 }
 
 async function loadStatus() {
@@ -256,6 +451,7 @@ async function loadStatus() {
     // The voice, then the optional Fish key. Fish is red ONLY when there is
     // no voice at all; with Piper answering, a missing key is not a fault.
     paintVoice(status);
+    paintVoicePicker(status);
     setDotStatus("status-fish",
       status.env_keys_set.fish_audio ? "green" : voiceMissing(status) ? "red" : "off");
 
@@ -327,6 +523,19 @@ function wireEvents() {
       await apiPost("/api/settings/keys", { key_name: "FISH_VOICE_ID", key_value: voiceId });
     }
   });
+
+  // Voice picker
+  document.getElementById("select-voice-provider")?.addEventListener("change", () => {
+    voicePickerDirty = true;
+    showPickerResult("");
+    paintVoiceChoice();
+  });
+  document.getElementById("select-voice-name")?.addEventListener("change", () => {
+    voicePickerDirty = true;
+    showPickerResult("");
+  });
+  document.getElementById("btn-test-voice")?.addEventListener("click", () => { void testVoice(); });
+  document.getElementById("btn-save-voice")?.addEventListener("click", () => { void saveVoice(); });
 
   // Test Fish
   document.getElementById("btn-test-fish")?.addEventListener("click", async () => {

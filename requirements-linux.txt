@@ -9,3 +9,9 @@ piper-tts>=1.3.0
 # faster-whisper>=1.0.0
 # openwakeword>=0.6.0
 # onnxruntime>=1.16
+
+# More output voices (docs/voz.md). Optional and off unless you choose them;
+# scripts/install-ubuntu.sh installs them with JARVIS_INSTALL_KOKORO=1 and
+# JARVIS_INSTALL_EDGE=1. Uncomment to install by hand.
+# kokoro-onnx>=0.6.0      # local; also needs the ~92 MB model, see docs/voz.md
+# edge-tts>=7.3.1         # CLOUD (Microsoft): sends the text of each sentence out

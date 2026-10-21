@@ -270,6 +270,9 @@ SAMPLES = {
     "_TASK_HEADING": "## Task 1: wire the executor",
     "_CHECKBOX": "- [x] done",
     "_ENTITY_RE": "light.salon",
+    "_PIPER_VOICE_RE": "es_ES-davefx-medium",
+    "_KOKORO_VOICE_RE": "em_alex",
+    "_EDGE_VOICE_RE": "es-ES-AlvaroNeural",
 }
 
 ALPHABET = ("abcdefghijklmnopqrstuvwxyz0123456789"
