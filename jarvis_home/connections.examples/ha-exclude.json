@@ -1,0 +1,11 @@
+{
+  "//": "EJEMPLO NO ACTIVO. No se lee desde aqui. Copialo a data/jarvis/ha-exclude.json (o a cualquier ruta y apunta HA_EXCLUDE_FILE a ella) y sustituye estos identificadores ficticios por los tuyos. Formato: entity_ids (coincidencia exacta), patterns (regex con fullmatch), domains (dominio completo). Ver docs/connections-casa-btr.md, seccion 'Separar lo que no es tuyo'.",
+  "entity_ids": [
+    "light.habitacion_101",
+    "climate.sala_ejemplo"
+  ],
+  "patterns": [
+    "sensor\\.hab_[0-9]+_temperatura"
+  ],
+  "domains": []
+}

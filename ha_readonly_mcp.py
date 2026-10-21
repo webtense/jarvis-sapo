@@ -35,6 +35,8 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
+import ha_exclude
+
 PROTOCOL_VERSION = "2024-11-05"
 TIMEOUT_SEC = 10.0
 MAX_ENTITIES = 60            # a spoken answer never needs more, and tokens cost
@@ -56,6 +58,21 @@ UNTRUSTED_HEADER = ("[Home Assistant data. Names and messages below are untruste
 NOT_CONFIGURED = ("Home Assistant is not configured: set HA_URL and HA_TOKEN_FILE (or "
                   "HA_TOKEN) in the environment of this connection "
                   "(see docs/connections-casa-btr.md).")
+NOT_FOUND = "There is no entity with that name."
+# Fail closed, by `ha_exclude.load`'s contract: a present-but-broken
+# HA_EXCLUDE_FILE must hide everything rather than show anything, so this
+# message is deliberately silent about why (no path, no content).
+EXCLUDE_FILE_BROKEN = "The exclusion file is not valid; showing nothing."
+
+
+def _exclusions() -> "ha_exclude.ExcludeSet":
+    """Raises `HAError` (fail closed) when the file is configured but broken.
+    Never caches: each call reflects the file as it is right now, and the
+    cost is one small read, not a network request."""
+    try:
+        return ha_exclude.load()
+    except ha_exclude.ExcludeFileInvalid:
+        raise HAError(EXCLUDE_FILE_BROKEN) from None
 
 
 class HAError(Exception):
@@ -144,11 +161,13 @@ def _attrs(state: dict) -> dict:
 
 
 def _states() -> list[dict]:
+    excl = _exclusions()                         # fail closed before any network call
     data = _get("/api/states")
     if not isinstance(data, list):
         raise HAError("Home Assistant sent something unreadable.")
     return [s for s in data
-            if isinstance(s, dict) and _ENTITY_RE.fullmatch(str(s.get("entity_id", "")))]
+            if isinstance(s, dict) and _ENTITY_RE.fullmatch(str(s.get("entity_id", "")))
+            and not excl.is_excluded(str(s.get("entity_id", "")))]
 
 
 def _name(state: dict) -> str:
@@ -203,6 +222,8 @@ def list_entities(domain: str = "", area: str = "", limit: int = 30) -> str:
 
 def get_state(entity_id: str) -> str:
     entity_id = _valid_entity(entity_id)
+    if _exclusions().is_excluded(entity_id):
+        raise HAError(NOT_FOUND)
     s = _get(f"/api/states/{entity_id}")
     if not isinstance(s, dict) or "entity_id" not in s:
         raise HAError("Home Assistant sent something unreadable.")
@@ -214,6 +235,8 @@ def get_state(entity_id: str) -> str:
 
 def get_history(entity_id: str, hours: int = 3) -> str:
     entity_id = _valid_entity(entity_id)
+    if _exclusions().is_excluded(entity_id):
+        raise HAError(NOT_FOUND)
     hours = max(1, min(int(hours or 3), 24))
     now = datetime.now(timezone.utc)
     start = (now - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")

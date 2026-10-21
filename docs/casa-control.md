@@ -233,6 +233,22 @@ Los nombres que dice JARVIS son los de tu fichero (o el id de la entidad), nunca
 5. Quita el simulacro cuando estés conforme.
 6. Los avisos, aparte: `home-alerts.json` con una sola regla y sube desde ahí.
 
+## Separar lo que no es tuyo
+
+El mismo filtro de `docs/connections-casa-btr.md` protege también el control:
+una entidad de `data/jarvis/ha-exclude.json` (o de `HA_EXCLUDE_FILE`) nunca se
+ejecuta desde `home_actions.py`, aunque esté en tu propio
+`home-actions.json` — es una segunda comprobación, independiente de la
+primera. Mismo formato (`entity_ids` exactos, `patterns` con `re.fullmatch`,
+`domains`), mismo fallo cerrado: si el fichero de exclusión existe pero no es
+válido, toda acción se rechaza (se anota en `home-actions.log` como una
+petición rechazada) hasta que vuelva a ser válido. Sin el fichero, el control
+funciona exactamente igual que antes de esta sección.
+
+Filtrar aquí no sustituye a separar bien las cuentas: es una lista que aplica
+JARVIS, no un límite de Home Assistant. El usuario de acciones (`docs` más
+abajo) sigue siendo la protección real si el token se usa fuera de JARVIS.
+
 ## Decisiones que son tuyas
 
 JARVIS no puede decidirlas por ti:
