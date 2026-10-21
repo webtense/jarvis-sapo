@@ -538,6 +538,12 @@ EXEMPT = {
         "response envelope, never rendered into prose"),
     "google_readonly_mcp.main": (
         "the same JSON-RPC envelope id, echoed on the internal-error path"),
+    "sapofit_readonly_mcp.handle": (
+        "`id` is the JSON-RPC message id off the stdio channel, echoed in the "
+        "response envelope, never rendered into prose; the only text it builds "
+        "is the fixed unknown-method line, and the tool answers are wrapped"),
+    "sapofit_readonly_mcp.main": (
+        "the same JSON-RPC envelope id, echoed on the internal-error path"),
     "whatsapp_readonly_mcp.whatsapp_list_chats": (
         "the read-only WhatsApp connection is a separate stdio process, not a "
         "session or a run. The chat names and ids are other people's: each "

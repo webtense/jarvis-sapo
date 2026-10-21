@@ -285,6 +285,12 @@ SAMPLES = {
     "_PHONE_RE": "+34 622 222 222",
     "_PHONE_ARG_RE": "+34 622 222 222",
     "_WHATSAPP_READER_RE": "mcp__whatsapp__whatsapp_read_chat",
+    # SapoFit (sapofit_readonly_mcp.py, sapofit_watch.py): fixed shapes.
+    "TOKEN_RE": "sfk_EJEMPLO_" + "a" * 35,  # gitleaks:allow (token de prueba)
+    "DATE_RE": "2026-10-21",
+    "CURSOR_RE": "1729500000000:abc-DEF_1",
+    "REMINDER_KIND_RE": "REMINDER_WATER",
+    "_HHMM_RE": "23:00",
 }
 
 ALPHABET = ("abcdefghijklmnopqrstuvwxyz0123456789"

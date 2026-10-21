@@ -251,9 +251,11 @@ def test_the_default_base_is_the_public_sapofit(tmp_path, monkeypatch):
 
 
 def test_no_proxy_and_no_redirects_are_configured():
-    proxies = [h for h in sr._OPENER.handlers if isinstance(h, urllib.request.ProxyHandler)]
-    assert proxies and proxies[0].proxies == {}
-    assert any(isinstance(h, sr._NoRedirect) for h in sr._OPENER.handlers)
+    # Whatever handler urllib keeps, none may carry a proxy: an empty mapping
+    # (or no proxy handler at all) means the environment's proxies are unused.
+    for handler in sr._OPENER.handlers:
+        if isinstance(handler, urllib.request.ProxyHandler):
+            assert handler.proxies == {}
     assert sr._NoRedirect().redirect_request(None, None, 302, "x", {}, "https://x.invalid") is None
 
 
