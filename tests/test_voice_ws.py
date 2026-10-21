@@ -280,3 +280,32 @@ def test_fmt_reset_names_the_day_when_it_is_not_today(client):
     assert far.endswith(" at 10 AM") and any(ch.isdigit() for ch in far.split(" at ")[0])
     assert server._fmt_reset(None) == "later"
     assert server._fmt_reset("not a time") == "later"
+
+
+def test_a_flood_of_identical_mic_events_is_summarised_not_logged(monkeypatch, caplog):
+    """441,706 'engine ended' lines in an hour came from one page whose
+    recogniser could not open the microphone."""
+    import logging
+    import server
+    monkeypatch.setattr(server, "_mic_log_slots", {})
+    clock = [100.0]
+    monkeypatch.setattr(server.time, "monotonic", lambda: clock[0])
+    with caplog.at_level(logging.INFO, logger="jarvis"):
+        for _ in range(1000):
+            server._log_mic_event("engine ended")
+        server._log_mic_event("listening")
+        assert [r.getMessage() for r in caplog.records].count("mic: engine ended") == server._MIC_LOG_BURST
+        assert "mic: listening" in [r.getMessage() for r in caplog.records]
+        clock[0] += server._MIC_LOG_WINDOW_SEC + 1
+        server._log_mic_event("engine ended")
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("995 more" in m for m in messages)           # the summary
+    assert messages.count("mic: engine ended") == server._MIC_LOG_BURST + 1
+
+
+def test_the_mic_log_cannot_be_grown_by_inventing_texts(monkeypatch):
+    import server
+    monkeypatch.setattr(server, "_mic_log_slots", {})
+    for i in range(500):
+        server._log_mic_event(f"made up {i}")
+    assert len(server._mic_log_slots) <= server._MIC_LOG_MAX_TEXTS

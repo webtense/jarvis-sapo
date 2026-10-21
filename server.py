@@ -7203,6 +7203,33 @@ async def _handle_final_transcript(raw_text: str) -> None:
     _spawn(_handle_utterance(text))
 
 
+# The browser reports its recogniser's life here (see the "mic" message). A
+# recogniser that cannot open the microphone reports the same two lines over and
+# over: measured, 441,706 identical lines in an hour. The first few of each text
+# are logged, the rest are counted and summarised, so one misbehaving page
+# cannot fill the journal or hide everything else in it.
+_MIC_LOG_WINDOW_SEC = 30.0
+_MIC_LOG_BURST = 5
+_MIC_LOG_MAX_TEXTS = 64
+_mic_log_slots: dict[str, list] = {}      # text -> [window start, logged, suppressed]
+
+
+def _log_mic_event(text: str) -> None:
+    now = time.monotonic()
+    if len(_mic_log_slots) >= _MIC_LOG_MAX_TEXTS and text not in _mic_log_slots:
+        _mic_log_slots.clear()            # a client inventing texts cannot grow this
+    slot = _mic_log_slots.setdefault(text, [now, 0, 0])
+    if now - slot[0] > _MIC_LOG_WINDOW_SEC:
+        if slot[2]:
+            log.info("mic: %s (%d more in %d s, not logged)", text, slot[2], int(_MIC_LOG_WINDOW_SEC))
+        slot[0], slot[1], slot[2] = now, 0, 0
+    if slot[1] < _MIC_LOG_BURST:
+        slot[1] += 1
+        log.info("mic: %s", text)
+    else:
+        slot[2] += 1
+
+
 @app.websocket("/ws/voice")
 async def voice_handler(ws: WebSocket):
     """
@@ -7263,7 +7290,7 @@ async def voice_handler(ws: WebSocket):
                 # next to the transcripts, so "he did not hear me" can be read
                 # back rather than guessed at. Text only, length-capped, and
                 # it drives nothing.
-                log.info("mic: %s", str(msg.get("text", ""))[:120])
+                _log_mic_event(str(msg.get("text", ""))[:120])
                 continue
             if kind == "hush":
                 # The user pressed the key, or the button. Deliberately NOT a

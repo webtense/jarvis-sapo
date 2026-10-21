@@ -222,3 +222,40 @@ async def test_the_page_is_in_spanish_when_the_server_is(start_jarvis):
             assert "Preferencias del usuario" in sections
         finally:
             await browser.close()
+
+
+DEAD_RECOGNISER = """
+(() => {
+  class FakeSR {
+    constructor() { this.continuous = false; this.interimResults = false; this.lang = ''; }
+    start() { setTimeout(() => { this.onstart && this.onstart();
+                                 setTimeout(() => { this.onend && this.onend(); }, 5); }, 2); }
+    stop() {} abort() {}
+  }
+  window.SpeechRecognition = FakeSR; window.webkitSpeechRecognition = FakeSR;
+})();
+"""
+
+
+async def test_a_recogniser_that_dies_at_once_does_not_restart_in_a_loop(start_jarvis):
+    """Si el micrófono no se puede abrir, cada reconocedor muere nada más
+    nacer. Antes cada rotación y cada vigilancia añadían una cadena de
+    reinicios que nunca paraba (en vivo: ~380 'engine ended' por segundo y el
+    registro lleno). Ahora hay un solo reinicio pendiente, con espera creciente."""
+    from playwright.async_api import async_playwright
+
+    jarvis = start_jarvis("en", "browser")
+    ended: list[str] = []
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True, channel="chromium")
+        try:
+            page = await browser.new_page()
+            await page.add_init_script(DEAD_RECOGNISER)
+            page.on("console", lambda m: ended.append(m.text) if "engine ended" in m.text else None)
+            await page.goto(jarvis.base + "/")
+            await page.mouse.click(500, 400)
+            await asyncio.sleep(20)
+        finally:
+            await browser.close()
+    # Sin la espera creciente salen ~50 en 20 s (y crecen con las rotaciones).
+    assert 1 <= len(ended) <= 25, f"{len(ended)} reinicios en 20 s"

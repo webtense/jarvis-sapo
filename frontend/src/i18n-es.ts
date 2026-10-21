@@ -460,6 +460,7 @@ export const ES: Record<string, string> = {
   "Another app has taken the microphone — quit it, then reload.": "Otra aplicación ha tomado el micrófono. Ciérrela y recargue la página.",
   "Speech recognition lost its connection — that sentence was dropped.": "El reconocimiento de voz perdió la conexión; esa frase se ha perdido.",
   "Microphone stalled — restarting it.": "El micrófono se ha bloqueado; lo reinicio.",
+  "The microphone keeps shutting down; retrying more slowly.": "El micrófono se cierra una y otra vez; reintento más despacio.",
   "Microphone blocked — check this origin's mic permission.": "Micrófono bloqueado. Compruebe el permiso del micrófono para esta dirección.",
   "Could not open the microphone.": "No he podido abrir el micrófono.",
   "Local speech recognition error": "Error del reconocimiento de voz local.",

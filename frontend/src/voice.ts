@@ -67,6 +67,18 @@ const AUDIO_ATTACH_MS = 2500;
 // the microphone stop in the first place (see ROTATE_AFTER_MS).
 const RESTART_DELAY_MS = 250;
 
+// A recogniser that ends within this long of starting, without ever having
+// heard anything, is not "Chrome tearing a session down": the microphone is
+// not usable (taken, blocked, no device, speech service unreachable). Starting
+// another one at once does the same again, forever. Observed live: with every
+// rotation adding one more restart chain, the log filled with ~380 "engine
+// ended" lines a second. Such lives now back off exponentially.
+const SHORT_LIFE_MS = 2000;
+const RESTART_BACKOFF_MAX_MS = 15000;
+const SHORT_LIVES_BEFORE_NOTICE = 3;
+// A started engine that never reports start or end is not "alive" for ever.
+const STARTING_GRACE_MS = 10000;
+
 // Chrome ends a `continuous` session on its own after roughly eight seconds
 // without speech, and every end->start leaves a hole with no microphone in
 // it. Measured in this app: ~250ms per cycle, landing after a pause — which
@@ -260,11 +272,37 @@ function createBrowserVoiceInput(
     startedAt: number;
     stoppedAt: number;
     retired: boolean;                // handed over; its results are stale
+    ended: boolean;                  // onend fired (or start() was refused)
+    heard: boolean;                  // capture attached at least once
+    createdAt: number;
   }
 
   const engines: Engine[] = [];
   let liveIdx = 0;
   let rotateTimer: ReturnType<typeof setTimeout> | null = null;
+  let restartTimer: ReturnType<typeof setTimeout> | null = null;
+  // Consecutive engines that died at once without hearing anything.
+  let shortLives = 0;
+
+  function restartDelay(): number {
+    return Math.min(RESTART_DELAY_MS * 2 ** Math.min(shortLives, 7), RESTART_BACKOFF_MAX_MS);
+  }
+
+  function scheduleRestart() {
+    if (restartTimer) return;
+    restartTimer = setTimeout(() => {
+      restartTimer = null;
+      if (shouldListen && !paused && !waitingForRetry && !anyoneListening()) startSpare();
+    }, restartDelay());
+  }
+
+  /** Engines that are running, or were started a moment ago and have not
+   *  said either way: the ones that make another start redundant. */
+  function aliveEngines(): Engine[] {
+    const now = Date.now();
+    return engines.filter((e) => !e.retired && !e.ended
+      && (e.running || now - e.createdAt < STARTING_GRACE_MS));
+  }
 
   // The overlap means the same words can arrive twice, from both engines.
   const recentlySent: { text: string; at: number }[] = [];
@@ -306,7 +344,10 @@ function createBrowserVoiceInput(
     sr.interimResults = true;
     // Set by scripts/start-ubuntu.sh from JARVIS_LANGUAGE (es -> es-ES).
     sr.lang = (import.meta as any).env?.VITE_JARVIS_LANG || "en-US";
-    const e: Engine = { sr, running: false, audio: false, startedAt: 0, stoppedAt: 0, retired: false };
+    const e: Engine = {
+      sr, running: false, audio: false, startedAt: 0, stoppedAt: 0, retired: false,
+      ended: false, heard: false, createdAt: Date.now(),
+    };
 
     sr.onstart = () => {
       e.running = true;
@@ -316,6 +357,8 @@ function createBrowserVoiceInput(
     };
     sr.onaudiostart = () => {
       e.audio = true;
+      e.heard = true;
+      shortLives = 0;
       mark("audio attached");
       // We are live. Whoever we replaced can go.
       retireOthers(e);
@@ -324,16 +367,22 @@ function createBrowserVoiceInput(
     sr.onend = () => {
       e.running = false;
       e.audio = false;
+      e.ended = true;
       e.stoppedAt = Date.now();
       // Only worth saying when it was the one we were relying on.
       if (!e.retired) mark("engine ended");
-      // Never restart from inside onend — that is what produced sessions
-      // that report "listening" and never hear. The watchdog picks it up.
-      if (shouldListen && !paused && !waitingForRetry && !anyoneListening()) {
-        setTimeout(() => {
-          if (shouldListen && !paused && !waitingForRetry && !anyoneListening()) startSpare();
-        }, RESTART_DELAY_MS);
+      // A life this short with nothing heard means the microphone is not
+      // usable right now; count it so the next restart waits longer.
+      if (!e.retired && !e.heard && e.startedAt && e.stoppedAt - e.startedAt < SHORT_LIFE_MS) {
+        shortLives++;
+        if (shortLives === SHORT_LIVES_BEFORE_NOTICE) {
+          onError(t("The microphone keeps shutting down; retrying more slowly."));
+        }
       }
+      // Never restart from inside onend — that is what produced sessions
+      // that report "listening" and never hear. One timer, never one per
+      // ended engine: the watchdog picks up whatever this misses.
+      scheduleRestart();
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -359,11 +408,17 @@ function createBrowserVoiceInput(
     }
   }
 
-  function startSpare() {
+  function startSpare(handover = false) {
     // Reap anything finished so the array cannot grow without bound.
     for (let i = engines.length - 1; i >= 0; i--) {
-      if (!engines[i].running && engines[i].retired) engines.splice(i, 1);
+      if (!engines[i].running && (engines[i].retired || engines[i].ended)) engines.splice(i, 1);
     }
+    // Never more than one engine starting or listening, except for the
+    // deliberate overlap of a rotation (the one listening plus its spare).
+    // Without this every rotation, restart and watchdog tick added another
+    // engine, and a microphone that could not be opened made each of them
+    // restart itself forever.
+    if (aliveEngines().length >= (handover ? 2 : 1)) return;
     const e = makeEngine();
     engines.push(e);
     liveIdx = engines.length - 1;
@@ -373,6 +428,7 @@ function createBrowserVoiceInput(
       // Between states. Nothing else retries this — the watchdog does.
       mark("start() refused; watchdog will retry");
       e.running = false;
+      e.ended = true;
     }
   }
 
@@ -393,8 +449,14 @@ function createBrowserVoiceInput(
         rotateTimer = setTimeout(() => scheduleRotate(), QUIET_BEFORE_ROTATE_MS - quietFor);
         return;
       }
+      // Handing over only makes sense from an engine that is really capturing:
+      // rotating a dead one just adds another dead one.
+      if (!engines.some((x) => x.running && x.audio && !x.retired)) {
+        scheduleRotate();
+        return;
+      }
       mark("rotating (quiet; pre-empting the no-speech timeout)");
-      startSpare();
+      startSpare(true);
       scheduleRotate();
     }, ROTATE_AFTER_MS);
   }
