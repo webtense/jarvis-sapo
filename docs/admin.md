@@ -22,6 +22,7 @@ mira y nada más.
 | Escucha | `JARVIS_STT` (`browser`, `local`, `auto`), `JARVIS_STT_MODEL` (`tiny`, `base`, `small`), `JARVIS_WAKE_WORD` (`off`, `on`, `whisper`), `JARVIS_WAKE_WINDOW_SEC` (5 a 300), `JARVIS_BARGE_IN` (`off`, `on`), `JARVIS_BARGE_IN_RMS` (200 a 20000), `JARVIS_BARGE_IN_MS` (100 a 2000) | |
 | Conexiones | nada | servidores MCP de `connections.json` (nombre, si es local o remoto y si responde), Home Assistant y Google |
 | Casa | **Confirmar** o **Rechazar** una acción pendiente, solo si `panel_confirm` está activo | control activado o simulacro, recuento por dominio de la lista blanca, nº de entidades excluidas, últimas 20 líneas del registro |
+| Google | **Confirmar** o **Rechazar** una propuesta pendiente, solo si `panel_confirm` está activo en `google-actions.json` | escritura activada o no, simulacro, confirmación estricta, calendarios y listas de tareas permitidos, límite por minuto, últimas 20 líneas del registro |
 | Sistema | botón **Reiniciar** (la ruta de siempre, `POST /api/restart`) | versión, tiempo en marcha, servicio, motor de voz y de escucha efectivos |
 
 ### Qué cuesta cada ajuste de escucha
@@ -66,6 +67,35 @@ límites por minuto, auditoría) y **Rechazar funciona siempre**. La lista se ac
 cada pocos segundos mientras la miras, y no se repinta bajo el puntero ni con el foco en
 ella, para que un clic nunca confirme una acción distinta de la que leíste.
 
+## La sección Google
+
+Es la pantalla de las propuestas de escritura en tu cuenta de Google (ver
+`docs/google-escritura.md`). Tiene tres bloques:
+
+1. **Estado** (`GET /api/admin/google`, esquema cerrado, solo lectura): si la escritura
+   está activada, si es simulacro, si la confirmación es estricta, los calendarios y
+   listas de tareas permitidos y el límite por minuto. **La cuenta no se muestra**
+   (JARVIS no la guarda) y no sale ni un token ni la ruta de uno.
+2. **Esperando su confirmación**: las propuestas de Google pendientes
+   (`google` en `GET /api/bridge/pending`), cada una con la frase exacta que JARVIS dijo
+   en voz alta y el tiempo que le queda a la ventana (120 s). El texto es dato no
+   confiable y se pinta con `textContent`.
+   - Con `"panel_confirm": true` en `data/jarvis/google-actions.json` (lo escribes tú, a
+     mano) salen **Confirmar** y **Rechazar**, que llaman a `POST /api/google/{id}/confirm`
+     y `/reject`, las rutas de siempre: las mismas comprobaciones (lista blanca, límite
+     por minuto, auditoría) y el resultado o el error se muestran debajo.
+   - Sin `panel_confirm` la lista es de **solo lectura** con el aviso "Confirma por voz";
+     solo queda **Rechazar**, que funciona siempre. Es una decisión de seguridad: confirmar
+     desde el panel solo existe si tú lo activas. La confirmación hablada no cambia.
+3. **Últimas acciones**: las últimas 20 líneas de `google-actions.log` (fecha, tipo de
+   acción, quién confirmó, resultado). El servidor las calcula desde la ruta fija y no
+   devuelve ids, títulos ni textos, solo esos cinco campos acotados.
+
+La sección se actualiza sola cada 4 s, solo mientras la pestaña del navegador y la
+sección están a la vista, y no se repinta bajo el puntero ni con el foco en la lista
+para que un clic nunca decida una propuesta distinta de la que leíste. Como la de la casa,
+la lista blanca de Google **no se edita desde la pantalla**.
+
 ## Seguridad de la pantalla
 
 - **Esquema cerrado.** `POST /api/admin/settings` solo acepta las claves de la tabla de
@@ -79,9 +109,9 @@ ella, para que un clic nunca confirme una acción distinta de la que leíste.
   registrar los valores: el registro dice qué claves se guardaron, no qué valían.
 - **Mismo control de acceso que el resto.** Las rutas `/api/admin/*` están detrás de
   `web_auth.py` (Origin y Host); no hay CORS.
-- **Lecturas por rutas fijas.** `admin_panel.py` abre cuatro ficheros, cada uno por la ruta
+- **Lecturas por rutas fijas.** `admin_panel.py` abre seis ficheros, cada uno por la ruta
   que calcula el servidor (`connections.json`, `home-actions.json`, `ha-exclude.json`,
-  `home-actions.log`). Ninguna ruta llega en una petición.
+  `home-actions.log`, `google-actions.json` y `google-actions.log`). Ninguna ruta llega en una petición.
 - **Sin URLs ni variables.** De un servidor MCP se da el nombre, si es local o remoto y si
   responde; nunca su dirección, su línea de órdenes ni su bloque `env`. Los remotos se
   sondean desde el servidor con un GET sin cabeceras (para no mandar su `Authorization` a
@@ -97,6 +127,11 @@ ella, para que un clic nunca confirme una acción distinta de la que leíste.
 
 - Siempre a la vista, grande, abajo a la derecha (no está en el menú ☰). El icono pequeño
   de la esquina superior sigue ahí y comparte estado con él.
+- **Siempre por encima del modal.** El panel de Ajustes (el de primer uso se abre solo a los
+  2 s si no hay voz) y su fondo tienen `z-index: 100`; el botón MUTE, 110. Con el modal abierto
+  el botón se ve y se pulsa. Para que no tape el último control del panel (sobre todo a ~375 px,
+  donde el panel ocupa toda la anchura), el cuerpo del panel deja 104 px libres al final: al
+  desplazarlo hasta abajo ningún control queda bajo el botón.
 - La etiqueta **es** el estado: `ESCUCHANDO` con un punto verde (micrófono abierto) o
   `MUTE` con un punto rojo (cerrado). No depende solo del color. Lleva `aria-pressed`, se
   alcanza con el tabulador y se activa con Espacio o Intro.
@@ -114,6 +149,8 @@ ella, para que un clic nunca confirme una acción distinta de la que leíste.
 
 Este cambio se desarrolló sin poder compilar ni ejecutar la suite en el equipo del autor:
 lo verifica la CI (`tsc --noEmit`, `vite build`, pytest y el job `e2e` con Chromium y Firefox
-reales). La lista de acciones pendientes con botones Confirmar/Rechazar y la prueba de
-voz desde la pantalla no tienen prueba E2E automática; solo la tienen el botón MUTE y la
-ausencia de audio con el micrófono cerrado.
+reales). Las listas de acciones pendientes con botones Confirmar/Rechazar (casa y Google) y la prueba de
+voz desde la pantalla no tienen prueba E2E automática; solo la tienen el botón MUTE (con el
+modal abierto y cerrado, y a 375 px) y la ausencia de audio con el micrófono cerrado. La
+sección Google tiene pruebas del servidor (esquema cerrado, sin secretos, rutas fijas) pero no
+del dibujo de la página.

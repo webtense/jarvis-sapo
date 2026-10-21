@@ -13,7 +13,7 @@ página web que escribe en el `.env` del equipo, así que:
    enumeración o un rango, encontrados en el propio servidor y no escritos
    aquí.
 
-2. **La lectura no devuelve secretos.** Ninguna de las cuatro rutas de
+2. **La lectura no devuelve secretos.** Ninguna de las rutas de
    lectura puede contener un token, una URL o una ruta de fichero: se
    comprueba contra respuestas construidas con ficheros de prueba que llevan
    valores reconocibles dentro, y se busca cada uno de esos valores en el
@@ -264,6 +264,8 @@ def test_no_settings_route_hands_back_a_key(client, server):
 
 SECRET_URL = "https://mcp.example.invalid/sEcReT-Path-9931"  # gitleaks:allow valor de prueba falso
 SECRET_TOKEN = "ha-token-value-77771111"  # gitleaks:allow valor de prueba falso
+GOOGLE_FIELD_SECRET = "Cita-con-el-medico-4417"  # gitleaks:allow valor de prueba falso
+GOOGLE_RESULT_ID_SECRET = "evt-id-secreto-5528"  # gitleaks:allow valor de prueba falso
 
 
 @pytest.fixture
@@ -308,6 +310,17 @@ def wired(server, tmp_path, monkeypatch):
                     "entity": "light.salon", "service": "light.turn_on",
                     "params": {}, "confirmed_by": "voice", "result": "ok",
                     "dryrun": False}) for i in range(5)) + "\n")
+    data_paths.google_actions_path().write_text(json.dumps({
+        "enabled": True, "calendars": ["primary", "familia@group.example.invalid"],
+        "task_lists": ["@default"], "limits": {"max_per_minute": 4}}))
+    os.chmod(data_paths.google_actions_path(), 0o600)
+    data_paths.google_actions_log_path().write_text("\n".join(
+        json.dumps({"ts": "2026-10-21T10:00:%02d+00:00" % i,
+                    "kind": "calendar_create",
+                    "fields": {"title": GOOGLE_FIELD_SECRET},
+                    "confirmed_by": "voice", "result": "ok",
+                    "result_id": GOOGLE_RESULT_ID_SECRET, "dryrun": False})
+        for i in range(25)) + "\n")
     data_paths.ha_exclude_path().write_text(json.dumps({
         "entity_ids": ["light.habitacion_101"], "patterns": [], "domains": ["lock"]}))
     os.chmod(data_paths.ha_exclude_path(), 0o600)
@@ -321,7 +334,7 @@ async def _never_answers(url: str) -> str:
 
 
 READ_ROUTES = ["/api/admin/connections", "/api/admin/home",
-               "/api/admin/system", "/api/admin/settings"]
+               "/api/admin/system", "/api/admin/settings", "/api/admin/google"]
 
 
 @pytest.mark.parametrize("route", READ_ROUTES)
@@ -332,6 +345,7 @@ def test_no_read_route_returns_a_secret(client, wired, route, tmp_path):
     for secret in (SECRET_TOKEN, SECRET_URL, "google-access-99",
                    "google-refresh-99", "csecret-99", "cid-99",
                    "c2VjcmV0OnBhc3M=", str(tmp_path / "ha_token"),
+                   GOOGLE_FIELD_SECRET, GOOGLE_RESULT_ID_SECRET,
                    "/opt/nowhere/python3", "ha.example.invalid"):
         assert secret not in body, f"{route} leaked {secret!r}"
 
@@ -438,17 +452,19 @@ def test_the_system_report_reads_the_version_and_never_writes_it(client, server)
 
 # --- the fixed paths -----------------------------------------------------
 
-def test_the_only_files_read_are_the_four_fixed_ones(client, wired, monkeypatch):
+def test_the_only_files_read_are_the_six_fixed_ones(client, wired, monkeypatch):
     """No path reaches `admin_panel` from a request. The proof is a watch on
     `open` while every read route is called: each file touched under the data
-    directory must be one of the four this screen is allowed to read."""
+    directory must be one of the six this screen is allowed to read."""
     import data_paths
     import builtins
     home = data_paths.brain_home().resolve()
     allowed = {data_paths.connections_path().resolve(),
                data_paths.home_actions_path().resolve(),
                data_paths.home_actions_log_path().resolve(),
-               data_paths.ha_exclude_path().resolve()}
+               data_paths.ha_exclude_path().resolve(),
+               data_paths.google_actions_path().resolve(),
+               data_paths.google_actions_log_path().resolve()}
     seen: list[Path] = []
     real_open = builtins.open
 
@@ -497,6 +513,61 @@ def test_the_house_says_whether_the_panel_may_confirm(client, wired):
 
 def test_the_house_is_not_confirmable_from_the_panel_when_it_is_off(client, server):
     assert client.get("/api/admin/home", headers=ORIGIN).json()["panel_confirm"] is False
+
+
+# --- Google ----------------------------------------------------------------
+
+def test_google_report_has_a_closed_shape_and_no_account(client, wired):
+    body = client.get("/api/admin/google", headers=ORIGIN).json()
+    assert set(body) == {"enabled", "reason", "dryrun", "confirm_strict",
+                         "panel_confirm", "calendars", "task_lists",
+                         "max_per_minute", "ttl_sec", "account_known",
+                         "problems", "log"}
+    assert body["enabled"] is True
+    assert body["calendars"] == ["familia@group.example.invalid", "primary"]
+    assert body["task_lists"] == ["@default"]
+    assert body["max_per_minute"] == 4
+    assert body["ttl_sec"] == int(wired.GOOGLE_PROPOSAL_TTL)
+    # JARVIS never records the account, so the report never claims one.
+    assert body["account_known"] is False
+    assert body["panel_confirm"] is False
+
+
+def test_google_audit_tail_is_twenty_lines_with_five_fields(client, wired):
+    log = client.get("/api/admin/google", headers=ORIGIN).json()["log"]
+    assert len(log) == 20
+    assert log[-1]["ts"].endswith(":24+00:00")
+    for entry in log:
+        assert set(entry) == {"ts", "kind", "result", "confirmed_by", "dryrun"}
+
+
+def test_google_says_it_is_off_without_an_allow_list(client, server):
+    body = client.get("/api/admin/google", headers=ORIGIN).json()
+    assert body["enabled"] is False
+    assert body["panel_confirm"] is False
+    assert body["reason"]
+    assert body["calendars"] == [] and body["log"] == []
+
+
+def test_google_panel_confirm_is_read_from_the_users_file(client, wired):
+    import data_paths
+    path = data_paths.google_actions_path()
+    body = json.loads(path.read_text())
+    body["panel_confirm"] = True
+    path.write_text(json.dumps(body))
+    os.chmod(path, 0o600)
+    assert client.get("/api/admin/google", headers=ORIGIN).json()["panel_confirm"] is True
+    assert json.loads(path.read_text()) == body, "the screen rewrote the allow-list"
+
+
+def test_google_log_text_arrives_without_control_characters(client, wired):
+    import data_paths
+    data_paths.google_actions_log_path().write_text(json.dumps({
+        "ts": "t", "kind": "x\x1b[31my", "result": "r\x00z",
+        "confirmed_by": "panel", "dryrun": True}) + "\n")
+    entry = client.get("/api/admin/google", headers=ORIGIN).json()["log"][0]
+    assert entry["kind"] == "x?[31my" and entry["result"] == "r?z"
+    assert entry["dryrun"] is True
 
 
 def test_the_admin_page_builds_no_markup_from_strings():

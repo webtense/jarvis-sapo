@@ -5,7 +5,8 @@ Tres reglas gobiernan este módulo, y son la razón de que exista aparte de
 
 1. **Rutas fijas.** Cada fichero que se lee aquí se localiza con una función
    de `data_paths` (`connections.json`, `home-actions.json`,
-   `ha-exclude.json`, `home-actions.log`). Ninguna ruta llega en una
+   `ha-exclude.json`, `home-actions.log`, `google-actions.json`,
+   `google-actions.log`). Ninguna ruta llega en una
    petición, ni siquiera como nombre de fichero dentro de una carpeta: la
    pantalla no elige qué se lee.
 
@@ -239,14 +240,9 @@ def _exclusion_counts() -> dict:
             "patterns": len(excl.patterns), "domains": len(excl.domains)}
 
 
-def _audit_tail() -> list:
-    """Las últimas líneas del registro de acciones, con tres campos.
-
-    El registro lo escribe `home_actions.audit`, que ya limpia lo que guarda;
-    aun así se vuelve a limpiar y a acotar aquí, porque es un fichero en
-    disco y lo que haya en él es dato, no verdad.
-    """
-    path = data_paths.home_actions_log_path()
+def _tail_lines(path) -> list:
+    """Las últimas líneas JSON de un registro, como diccionarios. Cada una es
+    dato de un fichero en disco: se acota y se descarta lo que no es un objeto."""
     try:
         size = path.stat().st_size
         with open(path, "rb") as fh:
@@ -262,15 +258,24 @@ def _audit_tail() -> list:
             entry = json.loads(line)
         except ValueError:
             continue
-        if not isinstance(entry, dict):
-            continue
-        out.append({
-            "ts": safe_text(entry.get("ts"), 40),
-            "entity": safe_text(entry.get("entity"), 80),
-            "result": safe_text(entry.get("result"), 80),
-            "dryrun": entry.get("dryrun") is True,
-        })
+        if isinstance(entry, dict):
+            out.append(entry)
     return out
+
+
+def _audit_tail() -> list:
+    """Las últimas líneas del registro de acciones, con tres campos.
+
+    El registro lo escribe `home_actions.audit`, que ya limpia lo que guarda;
+    aun así se vuelve a limpiar y a acotar aquí, porque es un fichero en
+    disco y lo que haya en él es dato, no verdad.
+    """
+    return [{
+        "ts": safe_text(entry.get("ts"), 40),
+        "entity": safe_text(entry.get("entity"), 80),
+        "result": safe_text(entry.get("result"), 80),
+        "dryrun": entry.get("dryrun") is True,
+    } for entry in _tail_lines(data_paths.home_actions_log_path())]
 
 
 def home_report() -> dict:
@@ -313,6 +318,64 @@ def home_report() -> dict:
     report["by_domain"] = dict(sorted(counts.items()))
     report["names"] = sorted(
         safe_text(name) for name in list(policy.entities.values())[:MAX_NAMES])
+    report["problems"] = [safe_text(p, 300) for p in policy.problems[:MAX_PROBLEMS]]
+    return report
+
+
+# ---------------------------------------------------------------------------
+# Escritura en Google
+# ---------------------------------------------------------------------------
+
+def _google_audit_tail() -> list:
+    """Las últimas líneas del registro de Google: fecha, tipo de acción,
+    resultado, quién confirmó y si fue simulacro. Nunca `fields` (ids, títulos)
+    ni `result_id`: la pantalla no necesita más para saber qué pasó."""
+    return [{
+        "ts": safe_text(entry.get("ts"), 40),
+        "kind": safe_text(entry.get("kind"), 40),
+        "result": safe_text(entry.get("result"), 80),
+        "confirmed_by": safe_text(entry.get("confirmed_by"), 10),
+        "dryrun": entry.get("dryrun") is True,
+    } for entry in _tail_lines(data_paths.google_actions_log_path())]
+
+
+def google_report(ttl_sec: int) -> dict:
+    """Escritura en Google, de solo lectura: si está activa, qué calendarios y
+    listas puede tocar, el límite por minuto y qué pasó.
+
+    `google-actions.json` NO se edita desde aquí, por la misma razón que la
+    lista blanca de la casa (ver `docs/admin.md`). La cuenta no se devuelve:
+    JARVIS no la guarda. Ni un token ni una ruta de token salen de aquí.
+    """
+    import google_actions
+    report = {
+        "enabled": False,
+        "reason": "",
+        "dryrun": google_actions.dryrun(),
+        "confirm_strict": google_actions.confirm_strict(),
+        # Lo decide SU fichero; aquí solo se lee.
+        "panel_confirm": False,
+        "calendars": [],
+        "task_lists": [],
+        "max_per_minute": 0,
+        "ttl_sec": int(ttl_sec),
+        "account_known": False,
+        "problems": [],
+        "log": _google_audit_tail(),
+    }
+    try:
+        policy = google_actions.load_policy()
+    except google_actions.Disabled as e:
+        report["reason"] = safe_text(str(e), 300)
+        return report
+    except Exception:                                    # pragma: no cover
+        report["reason"] = "Google writing could not be read"
+        return report
+    report["enabled"] = True
+    report["panel_confirm"] = policy.panel_confirm is True
+    report["calendars"] = sorted(safe_text(c, 120) for c in list(policy.calendars)[:MAX_NAMES])
+    report["task_lists"] = sorted(safe_text(c, 120) for c in list(policy.task_lists)[:MAX_NAMES])
+    report["max_per_minute"] = int(policy.max_per_minute)
     report["problems"] = [safe_text(p, 300) for p in policy.problems[:MAX_PROBLEMS]]
     return report
 

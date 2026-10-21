@@ -107,9 +107,34 @@ interface HomeResponse {
   log: HomeLogLine[];
 }
 
-/** `GET /api/bridge/pending`: only the `home` list is used here. */
+/** `GET /api/bridge/pending`: only the `home` and `google` lists are used here. */
+interface PendingItem { id: string; text: string; age: number }
 interface PendingResponse {
-  home?: Array<{ id: string; text: string; age: number }>;
+  home?: PendingItem[];
+  google?: PendingItem[];
+}
+
+interface GoogleLogLine {
+  ts: string;
+  kind: string;
+  result: string;
+  confirmed_by: string;
+  dryrun: boolean;
+}
+
+interface GoogleResponse {
+  enabled: boolean;
+  reason: string;
+  dryrun: boolean;
+  confirm_strict: boolean;
+  panel_confirm: boolean;
+  calendars: string[];
+  task_lists: string[];
+  max_per_minute: number;
+  ttl_sec: number;
+  account_known: boolean;
+  problems: string[];
+  log: GoogleLogLine[];
 }
 
 interface DecisionResponse {
@@ -588,22 +613,26 @@ let lastDecision: { text: string; tone: string } | null = null;
 /** The yes or no to one pending house action. It reuses the route the rest of
  * the interface already has (`/api/home/{id}/{confirm|reject}`): the server
  * decides whether a panel confirmation is allowed at all, not this page. */
-async function decideHome(id: string, decision: "confirm" | "reject"): Promise<void> {
+async function decideProposal(kind: "home" | "google", id: string,
+                              decision: "confirm" | "reject"): Promise<{ text: string; tone: string }> {
   try {
-    const res = await fetch(`/api/home/${encodeURIComponent(id)}/${decision}`, { method: "POST" });
+    const res = await fetch(`/api/${kind}/${encodeURIComponent(id)}/${decision}`, { method: "POST" });
     if (res.status === 404) {
-      lastDecision = { text: t("That request is no longer pending."), tone: "tone-bad" };
-      return;
+      return { text: t("That request is no longer pending."), tone: "tone-bad" };
     }
     const out = (await res.json()) as DecisionResponse;
     // The sentence is the server's own, already in the spoken language.
-    lastDecision = {
+    return {
       text: out.text || out.error || t("No answer from the server"),
       tone: res.ok && out.ok ? "tone-ok" : "tone-bad",
     };
   } catch {
-    lastDecision = { text: t("No answer from the server"), tone: "tone-bad" };
+    return { text: t("No answer from the server"), tone: "tone-bad" };
   }
+}
+
+async function decideHome(id: string, decision: "confirm" | "reject"): Promise<void> {
+  lastDecision = await decideProposal("home", id, decision);
 }
 
 /** Paints the list of house actions waiting for the user. Text is DATA. */
@@ -729,7 +758,154 @@ function renderHouse(view: HTMLElement, data: HomeResponse | null): void {
 }
 
 // ---------------------------------------------------------------------------
-// Section 6 — System
+// Section 6 — Google (read only, plus the panel's yes/no if the user allowed it)
+// ---------------------------------------------------------------------------
+
+let googleTimer: number | null = null;
+let googleDecision: { text: string; tone: string } | null = null;
+
+/** What the sentence of a pending proposal still has to live. */
+function windowLeft(ttl: number, age: number): string {
+  const left = ttl - age;
+  return left > 0
+    ? t("{time} left to decide", { time: unit(left, "s") })
+    : t("The window has run out");
+}
+
+function paintGoogleStatus(host: HTMLElement, data: GoogleResponse | null): void {
+  host.replaceChildren();
+  const { root, body } = panel(t("Google"), t("read only"));
+  if (!data) {
+    body.appendChild(note(t("No answer from the server")));
+    host.appendChild(root);
+    return;
+  }
+  body.appendChild(readout(t("Google writing"),
+    data.enabled ? t("on") : t("off"), data.enabled ? "tone-warn" : "tone-ok"));
+  if (!data.enabled && data.reason) body.appendChild(note(data.reason));
+  body.appendChild(readout(t("Dry run"),
+    data.dryrun ? t("yes — nothing is really done") : t("no")));
+  body.appendChild(readout(t("Strict confirmation"),
+    data.confirm_strict ? t("yes") : t("no")));
+  body.appendChild(readout(t("Account"), t("JARVIS does not store it")));
+  if (data.enabled) {
+    body.appendChild(readout(t("Allowed per minute"), String(data.max_per_minute)));
+    body.appendChild(el("h3", "subhead", t("Calendars it may write to")));
+    body.appendChild(lines(data.calendars, t("Nothing.")));
+    body.appendChild(el("h3", "subhead", t("Task lists it may write to")));
+    body.appendChild(lines(data.task_lists, t("Nothing.")));
+    if (data.problems.length > 0) {
+      body.appendChild(el("h3", "subhead", t("Ignored in the allow-list")));
+      body.appendChild(lines(data.problems, ""));
+    }
+  }
+  body.appendChild(note(t("The Google allow-list is NOT editable from this screen, for the same reason as the house one. Edit data/jarvis/google-actions.json by hand, with permissions 600, and restart.")));
+  host.appendChild(root);
+}
+
+function paintGooglePending(host: HTMLElement, data: GoogleResponse | null,
+                            pending: PendingResponse | null): void {
+  host.replaceChildren();
+  const canConfirm = data?.panel_confirm === true;
+  const { root, body } = panel(t("Waiting for your confirmation"), t("refreshes by itself"));
+  if (canConfirm) {
+    body.appendChild(note(t("A change to your Google account that JARVIS proposed. Nothing happens until you confirm it here or aloud; Reject always works.")));
+  } else {
+    body.appendChild(note(t("Confirm by voice. Confirming from this screen is off: it is turned on with \"panel_confirm\": true in the Google allow-list file, by hand. Reject always works.")));
+  }
+  const outcome = el("p", "result");
+  outcome.hidden = true;
+  if (googleDecision) say(outcome, googleDecision.text, googleDecision.tone);
+  body.appendChild(outcome);
+  const items = pending?.google ?? [];
+  if (!pending) {
+    body.appendChild(note(t("No answer from the server")));
+  } else if (items.length === 0) {
+    body.appendChild(note(t("Nothing is waiting.")));
+  }
+  const ttl = data?.ttl_sec ?? 0;
+  for (const item of items) {
+    const row = el("div", "pending-item");
+    // The sentence JARVIS said aloud, exactly. It is DATA: textContent only.
+    row.appendChild(el("p", "pending-text", item.text));
+    row.appendChild(el("p", "pending-age",
+      `${ago(unit(item.age, "s"))} · ${windowLeft(ttl, item.age)}`));
+    const confirm = button(t("Confirm"), "primary");
+    const reject = button(t("Reject"));
+    row.appendChild(actions(...(canConfirm ? [confirm, reject] : [reject])).root);
+    const decide = (decision: "confirm" | "reject"): void => {
+      confirm.disabled = true;
+      reject.disabled = true;
+      void decideProposal("google", item.id, decision).then((out) => {
+        googleDecision = out;
+        return refreshGoogle(host.closest(".view") as HTMLElement);
+      });
+    };
+    confirm.addEventListener("click", () => decide("confirm"));
+    reject.addEventListener("click", () => decide("reject"));
+    body.appendChild(row);
+  }
+  host.appendChild(root);
+}
+
+function paintGoogleLog(host: HTMLElement, data: GoogleResponse | null): void {
+  host.replaceChildren();
+  const { root, body } = panel(t("Last actions"), t("the last 20"));
+  if (!data || data.log.length === 0) {
+    body.appendChild(note(t("Nothing has been attempted.")));
+  } else {
+    for (const line of data.log) {
+      const suffix = line.dryrun ? ` (${t("dry run")})` : "";
+      const via = line.confirmed_by === "none" ? "" : ` · ${line.confirmed_by}`;
+      body.appendChild(readout(`${line.ts} · ${line.kind}${via}`, `${line.result}${suffix}`,
+        toneFor(line.result === "ok" || line.result === "dryrun"
+          || line.result === "proposed" || line.result === "rejected")));
+    }
+  }
+  host.appendChild(root);
+}
+
+/** The three parts of the Google view, found by id inside it. */
+function googleHosts(view: HTMLElement): { status: HTMLElement; pending: HTMLElement; log: HTMLElement } | null {
+  const status = view.querySelector<HTMLElement>(".g-status");
+  const pending = view.querySelector<HTMLElement>(".g-pending");
+  const log = view.querySelector<HTMLElement>(".g-log");
+  return status && pending && log ? { status, pending, log } : null;
+}
+
+async function refreshGoogle(view: HTMLElement | null): Promise<void> {
+  if (!view) return;
+  const hosts = googleHosts(view);
+  if (!hosts) return;
+  let data: GoogleResponse | null = null;
+  let pending: PendingResponse | null = null;
+  try { data = await apiGet<GoogleResponse>("/api/admin/google"); } catch { data = null; }
+  try { pending = await apiGet<PendingResponse>("/api/bridge/pending"); } catch { pending = null; }
+  paintGoogleStatus(hosts.status, data);
+  paintGoogleLog(hosts.log, data);
+  paintGooglePending(hosts.pending, data, pending);
+}
+
+function renderGoogle(view: HTMLElement): void {
+  view.replaceChildren();
+  for (const name of ["g-status", "g-pending", "g-log"]) view.appendChild(el("div", name));
+  if (googleTimer !== null) window.clearInterval(googleTimer);
+  void refreshGoogle(view);
+  googleTimer = window.setInterval(() => {
+    // Only while somebody is looking at this section of a visible tab.
+    if (!view.isConnected || document.hidden || view.hidden) return;
+    const hosts = googleHosts(view);
+    if (!hosts) return;
+    // Never repaint under a pointer or a keyboard focus about to press a
+    // button: a different proposal could take the place of the one that was
+    // read, and the click would then decide something never read.
+    if (hosts.pending.matches(":hover") || hosts.pending.contains(document.activeElement)) return;
+    void refreshGoogle(view);
+  }, PENDING_REFRESH_MS);
+}
+
+// ---------------------------------------------------------------------------
+// Section 7 — System
 // ---------------------------------------------------------------------------
 
 function renderSystem(view: HTMLElement, data: SystemResponse | null): void {
@@ -781,7 +957,7 @@ function renderSystem(view: HTMLElement, data: SystemResponse | null): void {
 // The page
 // ---------------------------------------------------------------------------
 
-const VIEWS = ["profile", "voice", "listening", "connections", "house", "system"] as const;
+const VIEWS = ["profile", "voice", "listening", "connections", "house", "google", "system"] as const;
 type ViewName = (typeof VIEWS)[number];
 
 const banner = document.getElementById("admin-banner");
@@ -849,6 +1025,9 @@ async function load(): Promise<void> {
   } catch { failures++; }
   const houseView = viewEl("house");
   if (houseView) renderHouse(houseView, house);
+
+  const googleView = viewEl("google");
+  if (googleView) renderGoogle(googleView);
 
   let system: SystemResponse | null = null;
   try {
