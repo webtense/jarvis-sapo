@@ -201,3 +201,36 @@ async def test_the_sentence_that_meets_the_failure_is_still_spoken(monkeypatch, 
     assert audio is not None and audio[:4] == b"RIFF"        # Piper's WAV
     assert fake_piper == ["Buenos días, señor."]
     assert tts.provider() == "piper"                          # and the next ones go straight there
+
+
+# ── velocidad de Piper ─────────────────────────────────────────────────────
+
+def test_piper_pace_defaults_to_the_voices_own_and_is_clamped(monkeypatch):
+    monkeypatch.delenv("PIPER_LENGTH_SCALE", raising=False)
+    assert tts.piper_length_scale() == 1.0 and tts._piper_synthesis_config() is None
+    for raw, expected in (("1.15", 1.15), ("0.1", 0.7), ("9", 1.6), ("rápido", 1.0), ("nan", 1.0), ("", 1.0)):
+        monkeypatch.setenv("PIPER_LENGTH_SCALE", raw)
+        assert tts.piper_length_scale() == expected, raw
+
+
+@pytest.mark.asyncio
+async def test_a_slower_pace_reaches_the_voice(fake_piper, monkeypatch):
+    seen = []
+
+    class Voice:
+        def synthesize_wav(self, text, out, syn_config=None):
+            seen.append(getattr(syn_config, "length_scale", None))
+            out.setnchannels(1); out.setsampwidth(2); out.setframerate(22050)
+            out.writeframes(b"\x00\x00" * 100)
+
+    monkeypatch.setattr(tts, "_load_voice", lambda path=None: Voice())
+    # `fake_piper` already put a proper module (with a __spec__, which
+    # `local_available()` looks for) in sys.modules: give it the config class.
+    monkeypatch.setattr(sys.modules["piper"], "SynthesisConfig",
+                        lambda length_scale: types.SimpleNamespace(length_scale=length_scale),
+                        raising=False)
+    monkeypatch.delenv("PIPER_LENGTH_SCALE", raising=False)
+    await tts.synthesize_local("hola")
+    monkeypatch.setenv("PIPER_LENGTH_SCALE", "1.2")
+    await tts.synthesize_local("hola")
+    assert seen == [None, 1.2]

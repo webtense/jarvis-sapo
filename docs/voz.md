@@ -148,3 +148,9 @@ comentadas, y las voces de Piper se bajan con
 Piper y Kokoro: nada, salvo disco, memoria y algo de CPU. Edge: gratis y sin clave,
 pero sin garantía ni contrato. Fish: crédito de pago; una clave sin crédito ya no
 deja a JARVIS mudo (ver arriba), pero tampoco te da la voz de Fish.
+
+## Velocidad y voz femenina
+
+- `PIPER_LENGTH_SCALE` (por defecto `1.0`) frena o acelera Piper: por encima de 1 habla más despacio (límites 0,7–1,6). Se lee en cada frase.
+- Voces femeninas en castellano que Piper ofrece: `es_MX-claude-high` (mexicana, la más natural de las probadas, ~63 MB) y `es_AR-daniela-high` (argentina, ~114 MB y bastante más lenta de sintetizar: unos 2,5 s por frase en un portátil con carga). Descárgalas con `python -m piper.download_voices --download-dir data/voices es_MX-claude-high` y elige una con `PIPER_VOICE`.
+- JARVIS dice tu nombre solo al saludar; el resto de frases van sin tratamiento.

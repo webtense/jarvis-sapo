@@ -194,6 +194,9 @@ def _clean_user_name() -> str:
     return m.group(0) if m else ""
 
 
+_GREETING_STARTS = ("Buenos ", "Buenas ", "Hola")
+
+
 def _honorific_es(spanish: str) -> str:
     """The Spanish template with "señor" turned into "señora", replaced by
     the user's own name, or dropped together with the comma that introduces
@@ -208,7 +211,10 @@ def _honorific_es(spanish: str) -> str:
         return _SENOR.sub("señora", spanish)
     if mode == "name":
         name = _clean_user_name()
-        if name:
+        # Said at every sentence, a name wears out ("Hecho, Andrés. Listo,
+        # Andrés."). Fixed phrases use it only to greet; everywhere else they
+        # read as if there were no form of address at all.
+        if name and spanish.startswith(_GREETING_STARTS):
             return _SENOR_CI.sub(name, spanish)
         mode = "none"
     return re.sub(r" {2,}", " ", _SENOR.sub("", _COMMA_SENOR.sub("", spanish)))

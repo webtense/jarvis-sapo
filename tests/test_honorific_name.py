@@ -91,3 +91,15 @@ def test_name_with_no_user_name_saves_fine_and_behaves_as_none_at_runtime(env, m
     _, parsed = server._read_env()
     assert parsed["HONORIFIC"] == "name"
     assert parsed.get("USER_NAME", "") == ""
+
+
+# ── el nombre solo para saludar ────────────────────────────────────────────
+
+def test_the_name_is_used_to_greet_and_dropped_elsewhere(monkeypatch):
+    import i18n
+    monkeypatch.setenv("JARVIS_LANGUAGE", "es")
+    monkeypatch.setenv("HONORIFIC", "name")
+    monkeypatch.setenv("USER_NAME", "Andrés")
+    assert i18n.t("Good morning, sir.") == "Buenos días, Andrés."
+    assert i18n.t("Terminal's open in jarvis, sir.") == "La terminal está abierta en jarvis."
+    assert "Andrés" not in i18n.t("Cancelled, sir.")
