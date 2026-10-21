@@ -43,7 +43,7 @@ MAX_DOMAINS = 200
 MAX_PATTERN_LEN = 200              # a pattern longer than this is refused, not run
 PATTERN_TIMEOUT_PROBES = 2000      # see _safe_pattern: a cheap ReDoS tripwire
 
-_ENTITY_ID_RE = re.compile(r"[a-z0-9_]+\.[a-z0-9_]+")
+_ENTITY_RE = re.compile(r"[a-z0-9_]+\.[a-z0-9_]+")
 _DOMAIN_RE = re.compile(r"[a-z0-9_]+")
 # Characters that commonly build catastrophic backtracking: nested
 # quantifiers, alternation inside a repeated group. This is a conservative
@@ -136,7 +136,7 @@ def _parse(data) -> ExcludeSet:
 
     entity_ids = set()
     for raw in entity_ids_raw:
-        if not isinstance(raw, str) or not raw.isascii() or not _ENTITY_ID_RE.fullmatch(raw):
+        if not isinstance(raw, str) or not raw.isascii() or not _ENTITY_RE.fullmatch(raw):
             raise ExcludeFileInvalid("the exclusion file is not valid")
         entity_ids.add(raw)
 
