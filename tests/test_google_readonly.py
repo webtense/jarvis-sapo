@@ -378,17 +378,14 @@ class _FakeHTTP(urllib.request.HTTPSHandler):
         return resp
 
 
-def test_a_redirect_is_not_followed(net):
+def test_a_redirect_is_not_followed(net, monkeypatch):
+    """`net` replaces `_open` with a canned transport; this test needs the REAL
+    `_open` over an opener whose transport answers 302, so it puts both back."""
     fake = _FakeHTTP()
-    import urllib.request as ur
-    net_opener = ur.build_opener(g._NoRedirect, fake)
-    import google_readonly_mcp as gmod
-    orig = gmod._OPENER
-    gmod._OPENER = net_opener
-    try:
-        err, text = _call("google_tasks_list")
-    finally:
-        gmod._OPENER = orig
+    opener = urllib.request.build_opener(g._NoRedirect, fake)
+    monkeypatch.setattr(g, "_OPENER", opener)
+    monkeypatch.setattr(g, "_open", lambda req, timeout: g._OPENER.open(req, timeout=timeout))
+    err, text = _call("google_tasks_list")
     assert err and "redirect" in text
     assert len(fake.seen) == 1
     assert "evil.invalid" not in text and SECRET not in text
