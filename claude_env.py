@@ -41,8 +41,11 @@ RUN_SCRUBBED_ENV_KEYS = {"HA_URL", "HA_TOKEN", "HA_TOKEN_FILE", "BTR_ACI_BASIC_A
 # the user said yes aloud, and by nobody else: neither an unattended run nor
 # the brain (nor any MCP server the brain starts) has any use for even its
 # path. So it is removed from BOTH environments, by prefix, so a variable
-# added later (HA_ACTIONS_URL...) is covered without anyone remembering.
-NEVER_INHERITED_PREFIXES = ("HA_ACTIONS_",)
+# added later (HA_ACTIONS_URL...) is covered without anyone remembering. The
+# same reasoning covers the Google WRITE credential (docs/google-escritura.md):
+# only the JARVIS server process, after the user's spoken "yes", has any use
+# for it — not the brain, not an MCP server it starts, not an unattended run.
+NEVER_INHERITED_PREFIXES = ("HA_ACTIONS_", "GOOGLE_WRITE_")
 
 # asyncio.create_subprocess_exec gives a child's stdout/stderr StreamReader a
 # 64 KiB *line* buffer by default (asyncio.streams._DEFAULT_LIMIT). `claude -p

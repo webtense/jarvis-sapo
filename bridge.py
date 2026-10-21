@@ -468,4 +468,8 @@ class Bridge:
             # /api/home/*, and show only the sentence that was spoken.
             "home": [{"id": p.id, "text": p.fact, "age": int(now - p.created)}
                      for p in self.proposals.values() if p.kind == "home"],
+            # Same idea for a proposed write to Google: decided on
+            # /api/google/*, never offered as something to "save" as a memory.
+            "google": [{"id": p.id, "text": p.fact, "age": int(now - p.created)}
+                      for p in self.proposals.values() if p.kind == "google"],
         }

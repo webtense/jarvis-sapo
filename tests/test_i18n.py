@@ -761,10 +761,13 @@ def test_the_persona_in_castilian_names_the_same_tools_and_rules():
     # recognises both: `FRESH_START_PHRASES_ES`).
     assert code(en) - code(es_text) == {"start fresh"}
     # Added on purpose, only in Spanish: the home-control tool and the field it
-    # takes. The English persona is pinned by hash (data_paths.KNOWN_TEMPLATE_HASHES)
-    # and this fork does not touch it; the control is off unless the user
-    # writes a whitelist, and the tool is hidden from the brain until then.
-    assert code(es_text) - code(en) == {"home_propose", "entity_id"}
+    # takes, and the same pair for the Google write tool (`google_propose`,
+    # its `action` field). The English persona is pinned by hash
+    # (data_paths.KNOWN_TEMPLATE_HASHES) and this fork does not touch it; both
+    # controls are off unless the user writes their own allow-list, and each
+    # tool is hidden from the brain until then.
+    assert code(es_text) - code(en) == {"home_propose", "entity_id",
+                                        "google_propose", "action"}
     for spoken in ("empezar de cero",):
         assert spoken in es_text
     for loan in ("frontend", "transcript", "tests frente", "prompt "):

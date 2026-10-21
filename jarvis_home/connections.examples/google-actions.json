@@ -1,0 +1,12 @@
+{
+  "//": "EJEMPLO NO ACTIVO (enabled: false). Para usarlo, copia este fichero a data/jarvis/google-actions.json, pon enabled a true y ajusta los limites. El fichero debe ser tuyo y no escribible por otros (chmod 600). Sin este fichero no hay escritura en Google. Cada accion se dice entera en voz alta y solo se ejecuta si contestas que si. Nunca invita a nadie, nunca comparte, nunca borra, nunca toca Gmail. El token de escritura va APARTE del de lectura, en un fichero 600 (GOOGLE_WRITE_TOKEN_FILE, generado con scripts/google-auth.py --write). Ver docs/google-escritura.md.",
+  "enabled": false,
+  "panel_confirm": false,
+  "calendars": ["primary"],
+  "task_lists": ["@default"],
+  "limits": {
+    "max_per_minute": 3,
+    "max_text_chars": 1500,
+    "max_lead_days": 365
+  }
+}

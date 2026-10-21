@@ -533,6 +533,24 @@ PAIRS: list[tuple[str, str]] = [
     ("{name} is drawing {value} watts, above your limit, sir.",
      "{name} consume {value} vatios, por encima de su límite, señor."),
 
+    # --- writing to Google (google_actions.py) --------------------------------
+    ("Shall I create the event {name} in your calendar, sir?",
+     "¿Creo el evento {name} en su calendario, señor?"),
+    ("Shall I update the event {name} in your calendar, sir?",
+     "¿Actualizo el evento {name} en su calendario, señor?"),
+    ("Shall I add {name} to your tasks, sir?", "¿Añado {name} a sus tareas, señor?"),
+    ("Shall I update the task {name}, sir?", "¿Actualizo la tarea {name}, señor?"),
+    ("Shall I mark the task {name} as complete, sir?",
+     "¿Marco la tarea {name} como completada, señor?"),
+    ("Shall I create a note titled {name} in your Drive, sir?",
+     "¿Creo una nota titulada {name} en su Drive, señor?"),
+    ("Shall I add that text to {name}, sir?", "¿Añado ese texto a {name}, señor?"),
+    ("Shall I do that in Google, sir?", "¿Hago eso en Google, señor?"),
+    ("I couldn't reach Google, sir.", "No he podido contactar con Google, señor."),
+    ("Google refused it, sir.", "Google lo ha rechazado, señor."),
+    ("I couldn't do that, sir: the Google connection is not set up properly.",
+     "No he podido hacerlo, señor: la conexión con Google no está bien configurada."),
+
     # --- settings API (shown by the UI) --------------------------------------
     ("No key provided", "No se ha indicado ninguna clave"),
     ("Invalid API key", "Clave de API no válida"),

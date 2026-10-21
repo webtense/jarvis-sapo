@@ -670,6 +670,44 @@ EXEMPT = {
         "sentence is `_describe_run`\'s and the task heading is "
         "`_build_progress_clause`\'s — all three driven. `project_name` "
         "appears once, in a `==` comparison"),
+
+    # google_actions.py's fields collide on NAME with a session's (`title`,
+    # `location`, `description`...) but hold none of its content: they are
+    # the user's OWN words for a calendar event/task/note, already cleaned by
+    # `Policy._one`/`_clean_text` (control characters stripped, length
+    # capped) before any of these functions ever sees them, and what each
+    # f-string builds is a JSON request BODY sent to Google — never a header
+    # line, never text spoken to the user, never text handed back to the
+    # brain's context.
+    "google_actions._calendar_create": (
+        "`f[\"title\"]`/`f[\"location\"]`/`f[\"description\"]` are the "
+        "user's own event fields, cleaned by `Policy._one`, going into the "
+        "JSON body of the one closed POST this function makes"),
+    "google_actions._calendar_update": (
+        "the same fields, same cleaning, into the JSON body of the one "
+        "closed PATCH this function makes"),
+    "google_actions._task_create": (
+        "`f[\"title\"]`/`f[\"notes\"]` are the user's own task fields, "
+        "cleaned by `Policy._one`, into the JSON body of the one closed "
+        "POST this function makes"),
+    "google_actions._task_update": (
+        "the same fields, same cleaning, into the JSON body of the one "
+        "closed PATCH this function makes"),
+    "google_actions._note_create": (
+        "`f[\"title\"]` names the Google Doc created inside \"JARVIS "
+        "Notas\"; it is cleaned by `Policy._one` and reaches only the JSON "
+        "body of the Docs/Drive calls this function makes, never a header"),
+    "google_actions._notes_folder_id": (
+        "it reads nothing foreign at all: `NOTES_FOLDER_NAME` is this "
+        "module's own fixed constant, matched because the walk's field set "
+        "happens to include `name`"),
+    "google_actions._label": (
+        "it reads the already-validated `out[\"title\"]` to build the short "
+        "spoken label `question()` uses; the value went through "
+        "`Policy._one`/`_clean_text` first (control characters stripped, "
+        "length capped), the same wall every other spoken field in this "
+        "class is driven against — it is sliced to 60 characters here, "
+        "never placed in a header line"),
 }
 
 
