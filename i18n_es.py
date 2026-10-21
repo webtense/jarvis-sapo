@@ -574,4 +574,14 @@ PAIRS: list[tuple[str, str]] = [
     ("{key} is not a setting JARVIS will write",
      "{key} no es un ajuste que JARVIS vaya a escribir"),
     ("That is not a valid honorific", "Ese tratamiento no es válido"),
+    # Pantalla de administración (POST /api/admin/settings).
+    ("That is not a setting this screen can change",
+     "Ese no es un ajuste que esta pantalla pueda cambiar"),
+    ("That is not one of the values this setting accepts",
+     "Ese no es uno de los valores que admite este ajuste"),
+    ("That setting must be a whole number",
+     "Ese ajuste tiene que ser un número entero"),
+    ("That setting must be between {low} and {high}",
+     "Ese ajuste tiene que estar entre {low} y {high}"),
+    ("There is nothing to save", "No hay nada que guardar"),
 ]

@@ -259,3 +259,97 @@ async def test_a_recogniser_that_dies_at_once_does_not_restart_in_a_loop(start_j
             await browser.close()
     # Sin la espera creciente salen ~50 en 20 s (y crecen con las rotaciones).
     assert 1 <= len(ended) <= 25, f"{len(ended)} reinicios en 20 s"
+
+
+# --- el botón MUTE de la pantalla principal --------------------------------
+
+async def test_the_mute_button_toggles_and_shows_its_state(start_jarvis):
+    """El botón grande existe, es accesible, alterna con el ratón y con la
+    tecla M, y su estado se lee en la etiqueta y en `aria-pressed`."""
+    from playwright.async_api import async_playwright
+
+    jarvis = start_jarvis("es", "browser")
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True, channel="chromium")
+        try:
+            page = await browser.new_page()
+            await page.goto(jarvis.base + "/")
+            button = page.locator("#mute-toggle")
+            # `data-ready` lo pone la página cuando ya atiende el botón.
+            await page.wait_for_selector("#mute-toggle[data-ready='1']", timeout=10000)
+
+            # Visible y grande, no escondido en el menú ☰.
+            assert await button.is_visible()
+            box = await button.bounding_box()
+            assert box is not None and box["width"] >= 120 and box["height"] >= 44
+            assert await page.locator("#menu-dropdown #mute-toggle").count() == 0
+            assert await button.evaluate("el => el.tagName") == "BUTTON"
+
+            # Escuchando: etiqueta en castellano y sin pulsar.
+            assert await button.get_attribute("aria-pressed") == "false"
+            assert (await page.text_content("#mute-label")).strip() == "ESCUCHANDO"
+
+            # Con el ratón.
+            await button.click()
+            assert await button.get_attribute("aria-pressed") == "true"
+            assert (await page.text_content("#mute-label")).strip() == "MUTE"
+            assert "is-muted" in (await button.get_attribute("class") or "")
+            # El botón pequeño de siempre comparte el mismo estado.
+            assert await page.get_attribute("#btn-mute", "aria-pressed") == "true"
+            await button.click()
+            assert await button.get_attribute("aria-pressed") == "false"
+            assert (await page.text_content("#mute-label")).strip() == "ESCUCHANDO"
+
+            # Con el teclado: M alterna; con el foco en un campo de texto, no.
+            await page.locator("body").press("m")
+            assert await button.get_attribute("aria-pressed") == "true"
+            await page.locator("body").press("M")
+            assert await button.get_attribute("aria-pressed") == "false"
+            await page.evaluate(
+                "() => { const i = document.createElement('input'); i.id = 'probe';"
+                " document.body.appendChild(i); i.focus(); }")
+            await page.keyboard.press("m")
+            assert await button.get_attribute("aria-pressed") == "false"
+            assert await page.input_value("#probe") == "m"
+
+            # Se llega con el teclado: el foco cae en el botón y Espacio lo activa.
+            await button.focus()
+            await page.keyboard.press("Space")
+            assert await button.get_attribute("aria-pressed") == "true"
+        finally:
+            await browser.close()
+
+
+async def test_a_muted_microphone_sends_no_audio_to_the_server(start_jarvis):
+    """Silenciado, la página no manda ni un fotograma de audio a `/ws/mic`
+    (aunque el micrófono falso esté repitiendo una frase entera); al activarlo
+    otra vez, la frase llega y se convierte en un turno."""
+    from playwright.async_api import async_playwright
+
+    jarvis = start_jarvis("es", "local")
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True, channel="chromium",
+                                           args=CHROMIUM_ARGS)
+        try:
+            context = await browser.new_context(permissions=["microphone"])
+            page = await context.new_page()
+            tap = SocketTap(page)
+            await tap.install()
+            await page.goto(jarvis.base + "/")
+            await page.wait_for_selector("#mute-toggle[data-ready='1']", timeout=10000)
+            await page.click("#mute-toggle")
+            assert await page.get_attribute("#mute-toggle", "aria-pressed") == "true"
+
+            # Tiempo de sobra para que la frase (~2,5 s) hubiera dado un turno.
+            await asyncio.sleep(9)
+            await tap.refresh()
+            assert not tap.mic("transcript"), "a muted page still got a transcript"
+            assert not jarvis.events("transcribe"), "audio reached the server while muted"
+            assert not jarvis.events("turn")
+
+            await page.click("#mute-toggle")
+            assert await page.get_attribute("#mute-toggle", "aria-pressed") == "false"
+            await wait_for(lambda: tap.mic("transcript"), "a transcript after unmuting", tap)
+            await wait_for(lambda: jarvis.events("turn"), "a turn after unmuting")
+        finally:
+            await browser.close()

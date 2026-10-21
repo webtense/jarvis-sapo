@@ -28,9 +28,19 @@
     <!-- Dropdown menu -->
     <div id="menu-dropdown" style="display:none">
       <button id="btn-settings" data-i18n>Settings</button>
+      <a id="link-admin" href="/admin.html" data-i18n>Admin</a>
       <button id="btn-restart" data-i18n>Restart Server</button>
       <button id="btn-fix-self" data-i18n>Fix Yourself</button>
     </div>
+
+    <!-- The microphone switch: large and always on screen, not in the menu.
+         Its state is the label (LISTENING / MUTE) and aria-pressed. -->
+    <button id="mute-toggle" type="button" aria-pressed="false"
+            title="Mute or unmute the microphone (M)" aria-label="Microphone"
+            data-i18n-title data-i18n-aria-label>
+      <span class="mute-dot" aria-hidden="true"></span>
+      <span id="mute-label">LISTENING</span>
+    </button>
 
     <div id="status-text"></div>
     <div id="jarvis-label">JARVIS</div>

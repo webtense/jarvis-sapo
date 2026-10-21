@@ -65,6 +65,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import actions
+import admin_panel
 import bridge
 import ha_watch
 import home_actions
@@ -7450,13 +7451,60 @@ async def mic_handler(ws: WebSocket):
 # containment check, so an endpoint that can write an arbitrary key is an
 # endpoint that can replace JARVIS's brain with /tmp/evil and then ask for
 # a restart.
+# The admin screen's own keys (`POST /api/admin/settings`). Every one of them
+# is a MODE SELECTOR read back by a module that already refuses anything it
+# does not recognise (`stt_local.requested_mode`, `lang.language`), and not
+# one of them names a program, a path or a credential — which is the line
+# `JARVIS_CLAUDE_PATH` and `JARVIS_PROJECT_ROOTS` are on the wrong side of.
+# They are additionally held to a closed enumeration or an integer range
+# before they ever reach `_write_env_key` (see `_admin_setting_problem`).
+ADMIN_ENUM_VALUES = {
+    "HONORIFIC": ("sir", "ma'am", "none", "name"),
+    "JARVIS_LANGUAGE": ("en", "es"),
+    "JARVIS_STT": ("browser", "local", "auto"),
+    "JARVIS_STT_MODEL": ("tiny", "base", "small"),
+    "JARVIS_WAKE_WORD": ("off", "on", "whisper"),
+    "JARVIS_BARGE_IN": ("off", "on"),
+}
+# key -> (minimum, maximum), both inclusive. Whole numbers only, written as
+# digits: no sign, no decimal point, no exponent.
+ADMIN_INT_RANGES = {
+    "JARVIS_WAKE_WINDOW_SEC": (5, 300),
+    "JARVIS_BARGE_IN_RMS": (200, 20000),
+    "JARVIS_BARGE_IN_MS": (100, 2000),
+}
+# The only free text the screen may write, and it is bounded by
+# ENV_NAME_KEYS below (64 characters) because it reaches the system prompt.
+ADMIN_TEXT_KEYS = ("USER_NAME",)
+ADMIN_SETTABLE_KEYS = frozenset(ADMIN_ENUM_VALUES) | frozenset(ADMIN_INT_RANGES) \
+    | frozenset(ADMIN_TEXT_KEYS)
+
+# When a saved setting starts counting.
+#
+# "restart" is not a hedge: `JARVIS_LANGUAGE` picks the persona the brain was
+# launched with and the language the PAGE was COMPILED for, and `JARVIS_STT`
+# is announced to the page in its opening config frame. Saying "done" for
+# either would be the same lie as reporting a stalled run as a success.
+ADMIN_APPLIES = {
+    "USER_NAME": "now",
+    "HONORIFIC": "now",
+    "JARVIS_LANGUAGE": "restart",
+    "JARVIS_STT": "restart",
+    "JARVIS_STT_MODEL": "next_listen",
+    "JARVIS_WAKE_WORD": "next_listen",
+    "JARVIS_WAKE_WINDOW_SEC": "next_listen",
+    "JARVIS_BARGE_IN": "next_listen",
+    "JARVIS_BARGE_IN_RMS": "next_listen",
+    "JARVIS_BARGE_IN_MS": "next_listen",
+}
+
 SETTABLE_ENV_KEYS = frozenset({
     "FISH_API_KEY", "FISH_VOICE_ID", "USER_NAME", "HONORIFIC",
     # The voice picker in Settings (`/api/settings/voice`, which checks the
     # values against what is installed). Read back by tts.py, which ignores
     # anything that is not a provider name or the shape of a voice name.
     "JARVIS_TTS_PROVIDER", "JARVIS_TTS_VOICE",
-})
+}) | ADMIN_SETTABLE_KEYS
 
 # A value may not carry anything that ends the line it is written on.
 #
@@ -7766,6 +7814,181 @@ async def api_save_preferences(body: PreferencesUpdate):
     return {"success": True}
 
 # ---------------------------------------------------------------------------
+# Admin screen (/admin.html)
+# ---------------------------------------------------------------------------
+#
+# ONE route writes, and it has a closed schema: `POST /api/admin/settings`.
+# Everything else here reads, from the fixed paths `admin_panel.py` resolves.
+#
+# No key, token or credential is writable from this screen, and none is
+# readable through it: `FISH_API_KEY` keeps its own route in Settings, and
+# the connections report answers "the token file is there and it is 0600"
+# rather than handing back anything that was in it.
+#
+# The web boundary (`web_auth.py`) is an ASGI gate ABOVE the router, so these
+# routes are behind the same Origin/Host check as everything else without
+# asking for it, and there is still no CORS.
+
+# How long a remote MCP server has to answer the liveness probe. Short on
+# purpose: this is "is it there", not "does it work", and a page that hangs
+# for ten seconds because somebody's tunnel is down is a worse answer than
+# "unknown".
+ADMIN_PROBE_TIMEOUT_SEC = 2.0
+ADMIN_MAX_PROBES = 8
+
+
+class AdminSettingsUpdate(BaseModel):
+    """Several settings at once. Every value is a STRING: a schema that
+    accepted an int here would be a schema with two spellings per value."""
+    settings: dict[str, str] = {}
+
+
+def _admin_int_problem(key: str, value: str) -> str | None:
+    """Whole numbers written as digits, inside the range for this key."""
+    low, high = ADMIN_INT_RANGES[key]
+    if not value.isascii() or not value.isdigit():
+        return i18n.t("That setting must be a whole number")
+    try:
+        number = int(value)
+    except ValueError:                                   # pragma: no cover
+        return i18n.t("That setting must be a whole number")
+    if not low <= number <= high:
+        return i18n.t(f"That setting must be between {low} and {high}")
+    return None
+
+
+def _admin_setting_problem(key: str, value: str) -> str | None:
+    """Why the admin screen may not save `key=value`, or None.
+
+    Three gates, in order: the key is one of this screen's own; the value is
+    in the closed enumeration or the integer range declared for it; and the
+    value survives the round trip every `.env` write already has to survive
+    (`_env_value_problem` — length, control characters, separators, quotes).
+    """
+    if key not in ADMIN_SETTABLE_KEYS:
+        return i18n.t("That is not a setting this screen can change")
+    if not isinstance(value, str):                       # pragma: no cover
+        return i18n.t("That is not a setting this screen can change")
+    if key in ADMIN_ENUM_VALUES:
+        if value not in ADMIN_ENUM_VALUES[key]:
+            return i18n.t("That is not one of the values this setting accepts")
+    elif key in ADMIN_INT_RANGES:
+        problem = _admin_int_problem(key, value)
+        if problem:
+            return problem
+    return _env_value_problem(key, value)
+
+
+def _admin_schema() -> dict:
+    """What the page is allowed to send, so it can build its own controls
+    from the server's list rather than from a second copy of it."""
+    return {
+        "enums": {k: list(v) for k, v in ADMIN_ENUM_VALUES.items()},
+        "ints": {k: {"min": lo, "max": hi}
+                 for k, (lo, hi) in ADMIN_INT_RANGES.items()},
+        "text": {k: {"max_chars": _env_value_max(k)} for k in ADMIN_TEXT_KEYS},
+        "applies": dict(ADMIN_APPLIES),
+    }
+
+
+@app.get("/api/admin/settings")
+async def api_admin_settings_get():
+    """The current value of every setting this screen owns, and the schema.
+
+    Nothing secret is in the answer: every key here is a mode selector or a
+    name, and `FISH_API_KEY` is not one of them.
+    """
+    _, env_dict = _read_env()
+    return {"values": admin_panel.current_values(env_dict),
+            "schema": _admin_schema()}
+
+
+@app.post("/api/admin/settings")
+async def api_admin_settings_post(body: AdminSettingsUpdate):
+    """The screen's only write. Closed schema, validated in full BEFORE the
+    first byte is written, so a bad value cannot leave half a form saved.
+
+    The answer names the keys and says when each one starts counting. It
+    never echoes a value back — there is nothing secret among these, but a
+    route that repeats what it was given is a route that will repeat the
+    wrong thing the day somebody adds a key that is.
+    """
+    if not body.settings:
+        return JSONResponse(
+            {"success": False, "error": i18n.t("There is nothing to save")},
+            status_code=400)
+    for key, value in body.settings.items():
+        problem = _admin_setting_problem(key, value)
+        if problem:
+            # The key is named (the page has to know which field is wrong);
+            # the value is not repeated.
+            return JSONResponse({"success": False, "key": key, "error": problem},
+                                status_code=400)
+    saved = sorted(body.settings)
+    try:
+        for key in saved:
+            _write_env_key(key, body.settings[key])
+    except ValueError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+    # Not logged with their values: `USER_NAME` is one of these.
+    log.info("admin: saved %d setting(s): %s", len(saved), ", ".join(saved))
+    return {"success": True, "saved": saved,
+            "applies": {key: ADMIN_APPLIES[key] for key in saved}}
+
+
+async def _probe_remote(url: str) -> str:
+    """`ready` if something answered at all, `down` if nothing did.
+
+    A plain GET with no headers: the server's own `Authorization` block may
+    hold a token and this probe must never be the thing that sends it
+    somewhere. Any HTTP status counts as alive — an MCP endpoint answering
+    405 to a GET is an MCP endpoint that is up.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=ADMIN_PROBE_TIMEOUT_SEC,
+                                     follow_redirects=False) as client:
+            await client.get(url)
+        return "ready"
+    except Exception:
+        return "down"
+
+
+@app.get("/api/admin/connections")
+async def api_admin_connections():
+    """The MCP servers the user declared, plus Home Assistant and Google.
+
+    Names and states only. No URL, no command line, no environment block, no
+    token and no path to one ever leaves this route.
+    """
+    declared = await asyncio.to_thread(declared_connections)
+    report = await asyncio.to_thread(
+        admin_panel.connections_report, declared.servers, declared.problems)
+    targets = admin_panel.remote_probe_urls(declared.servers)
+    probed = {}
+    for name in list(targets)[:ADMIN_MAX_PROBES]:
+        probed[name] = await _probe_remote(targets[name])
+    for entry in report["servers"]:
+        if entry["name"] in probed:
+            entry["status"] = probed[entry["name"]]
+    return report
+
+
+@app.get("/api/admin/home")
+async def api_admin_home():
+    """The house, read only: whether it is on, what it may touch, what it
+    did. The allow-list is NOT editable from here, by design — see
+    docs/admin.md."""
+    return await asyncio.to_thread(admin_panel.home_report)
+
+
+@app.get("/api/admin/system")
+async def api_admin_system():
+    uptime = int(time.time() - _session_start)
+    return await asyncio.to_thread(
+        admin_panel.system_report, uptime, tts.effective_provider())
+
+
+# ---------------------------------------------------------------------------
 # Control endpoints (restart)
 # ---------------------------------------------------------------------------
 
@@ -7806,6 +8029,19 @@ if FRONTEND_DIST.exists():
     @app.get("/dashboard")
     async def serve_dashboard():
         return FileResponse(str(FRONTEND_DIST / "dashboard.html"))
+
+    # La pantalla de administración, por el mismo mecanismo y con las mismas
+    # cabeceras que el panel (las pone `web_auth.OriginGuard`, por encima del
+    # router). `/admin.html` es la dirección que usa el servidor de desarrollo
+    # de Vite, así que las dos existen y sirven el mismo fichero: un enlace
+    # que funciona en desarrollo tiene que funcionar compilado.
+    @app.get("/admin")
+    async def serve_admin():
+        return FileResponse(str(FRONTEND_DIST / "admin.html"))
+
+    @app.get("/admin.html")
+    async def serve_admin_html():
+        return FileResponse(str(FRONTEND_DIST / "admin.html"))
 
     app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
 
