@@ -10,6 +10,8 @@
  * Nothing the server says back is ever treated as markup: it is only ever
  * handed to callbacks as strings.
  */
+import { t } from "./i18n";
+
 
 export interface LocalMic {
   start(): void;
@@ -114,7 +116,7 @@ export function createLocalMic(h: LocalMicHandlers): LocalMic {
       const type = msg.type;
       if (type === "transcript") h.onHeard(String(msg.text ?? ""));
       else if (type === "state") h.onState(String(msg.state ?? ""));
-      else if (type === "error") h.onError(String(msg.text ?? "Local speech recognition error"));
+      else if (type === "error") h.onError(t(String(msg.text ?? "Local speech recognition error")));
     };
     sock.onclose = (ev) => {
       if (ws === sock) ws = null;
@@ -148,7 +150,7 @@ export function createLocalMic(h: LocalMicHandlers): LocalMic {
     let myStream: MediaStream | null = null;
     let myCtx: AudioContext | null = null;
     const abandon = () => {
-      myStream?.getTracks().forEach((t) => t.stop());
+      myStream?.getTracks().forEach((track) => track.stop());
       myCtx?.close().catch(() => {});
     };
     try {
@@ -183,14 +185,14 @@ export function createLocalMic(h: LocalMicHandlers): LocalMic {
       if (mine === generation) capturing = false;
       const name = e && (e as { name?: string }).name;
       h.onError(name === "NotAllowedError"
-        ? "Microphone blocked — check this origin's mic permission."
-        : "Could not open the microphone.");
+        ? t("Microphone blocked — check this origin's mic permission.")
+        : t("Could not open the microphone."));
       h.onEvent(`local mic: capture failed: ${name}`);
     }
   }
 
   function releaseCapture() {
-    stream?.getTracks().forEach((t) => t.stop());
+    stream?.getTracks().forEach((track) => track.stop());
     stream = null;
     if (ctx) {
       ctx.close().catch(() => {});

@@ -8,6 +8,7 @@
  */
 
 import { createLocalMic } from "./localmic";
+import { t } from "./i18n";
 
 // ---------------------------------------------------------------------------
 // Voice Input
@@ -225,7 +226,7 @@ function createBrowserVoiceInput(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const SR = (window as any).SpeechRecognition || (typeof webkitSpeechRecognition !== "undefined" ? webkitSpeechRecognition : null);
   if (!SR) {
-    onError("Speech recognition not supported in this browser");
+    onError(t("Speech recognition not supported in this browser"));
     onMicEvent("no SpeechRecognition in this browser");
     return { start() {}, stop() {}, pause() {}, resume() {}, restart() {} };
   }
@@ -432,7 +433,7 @@ function createBrowserVoiceInput(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function handleError(event: any, e: Engine) {
     if (event.error === "not-allowed") {
-      onError("Microphone blocked — retrying. Check this origin's mic permission.");
+      onError(t("Microphone blocked — retrying. Check this origin's mic permission."));
       waitingForRetry = true;
       const delay = retryDelay;
       retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
@@ -445,9 +446,9 @@ function createBrowserVoiceInput(
     } else if (event.error === "no-speech" || event.error === "aborted") {
       // Routine. With rotation running there is normally a live twin already.
     } else if (event.error === "audio-capture") {
-      onError("Another app has taken the microphone — quit it, then reload.");
+      onError(t("Another app has taken the microphone — quit it, then reload."));
     } else if (event.error === "network") {
-      onError("Speech recognition lost its connection — that sentence was dropped.");
+      onError(t("Speech recognition lost its connection — that sentence was dropped."));
     } else {
       onError(`Speech recognition error: ${event.error}`);
     }
@@ -466,7 +467,7 @@ function createBrowserVoiceInput(
       if (idle < STALL_AFTER_MS) return;
       if (Date.now() - stallNoticeAt > 30000) {
         stallNoticeAt = Date.now();
-        onError("Microphone stalled — restarting it.");
+        onError(t("Microphone stalled — restarting it."));
       }
       mark("watchdog: nothing listening; restarting");
       startSpare();
