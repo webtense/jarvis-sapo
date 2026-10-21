@@ -14,8 +14,10 @@ When a user clones this repo and starts Claude Code, help them:
 2. Install Claude Code (`npm install -g @anthropic-ai/claude-code`, 2.1.224 or
    newer) and log in with `claude` — JARVIS's brain runs on your Claude
    subscription, not on an API key
-3. Get a Fish Audio API key from fish.audio (required — there is no fallback
-   voice)
+3. Voice: either a Fish Audio API key from fish.audio (optional, paid) or the
+   local Piper voice of the jarvis-ubuntu fork (`requirements-linux.txt`, free;
+   `tts.provider()` picks whichever is configured). With neither, JARVIS is
+   text only
 4. Install Python dependencies: pip install -r requirements.txt
 5. Install the Playwright browser: python -m playwright install chromium
    (`read_page` / `look_at_page` need it)
@@ -157,7 +159,7 @@ JARVIS builds**. It is only this repository's own copies that are gone.
   never spawns it (every test sets this)
 - `JARVIS_MUTE_MIC_DURING_SPEECH` (optional, default false) — fallback if echo
   rejection is not enough with a given microphone
-- `FISH_API_KEY` (required) — Fish Audio TTS
+- `FISH_API_KEY` (optional in jarvis-ubuntu, which can use Piper instead) — Fish Audio TTS
 - `FISH_VOICE_ID` (optional) — Voice model ID
 - `USER_NAME` (optional) — Your name for JARVIS to use
 - `JARVIS_DATA_DIR` (optional) — Where JARVIS writes everything: the SQLite
@@ -221,6 +223,8 @@ Fork de ethanplusai/jarvis para Ubuntu/Linux. Todo lo de arriba sigue valiendo; 
 - **Plataforma**: `host.py` (`is_linux()`, `is_wayland()`). Cada módulo que antes era solo macOS (`actions`, `screen`, `dialog`, `notifier`, `preflight`) conserva intacto su camino macOS y añade una rama Linux. Los tests fijan `host.is_linux` a False por defecto (`tests/conftest.py`); los de Linux usan la fixture `as_linux`.
 - **Voz**: `tts.py` tiene dos proveedores, Fish y Piper (local, `requirements-linux.txt`). `provider()` elige solo. Voces en `data/voices/` (ignorado por git).
 - **Idioma**: `lang.py`, `JARVIS_LANGUAGE=en|es`. Persona en `jarvis_home/CLAUDE.es.md`; si cambias `CLAUDE.md` en inglés, revisa también la versión es.
+- **Traducción**: las frases del código siguen en inglés y se traducen en las FRONTERAS, no en el origen. Servidor: `i18n.t()` con el catálogo `i18n_es.py` (plantillas inglés→castellano con marcadores `{x}`); la clave es el texto inglés exacto, así que si cambias una frase inglesa hay que cambiar su pareja (`tests/test_i18n.py` falla si una frase con "sir" no tiene pareja). Lo que escribe el cerebro, un transcript, un repo o Home Assistant es dato no confiable y NUNCA se traduce; `t()` ignora textos de más de 1500 caracteres. Interfaz: `frontend/src/i18n.ts` (idioma por `VITE_JARVIS_LANG`, que fija `scripts/start-ubuntu.sh`). Con `en` todo es idéntico al original.
+- **Navegadores**: Chrome usa su reconocimiento; Firefox no tiene ninguno, así que `JARVIS_STT=auto` ofrece la voz local y la página elige (`main.ts`). Whisper recibe una guía (`stt_local._PROMPTS`) para escribir bien "Jarvis".
 - **Voz de entrada local** (opt-in, `JARVIS_STT=local`): `stt_local.py` + `/ws/mic` + `frontend/src/localmic.ts`; los finales entran por `_handle_final_transcript`, el mismo camino que el reconocedor del navegador. Ver `docs/stt-local.md`.
 - **Puente MCP** (`jarvis_bridge_mcp.py`, rutas `/internal/bridge/*`): token propio y limitado (`data/bridge-token`), nada que actúe; `jarvis_remember` solo propone y confirma el usuario. Ver `docs/bridge.md`.
 - **Casa/BTR solo lectura** (`ha_readonly_mcp.py`, ejemplos en `jarvis_home/connections.examples/`): el token va en un fichero 600 (`HA_TOKEN_FILE`), `claude_env.run_env()` lo quita de los runs. Ver `docs/connections-casa-btr.md`.
