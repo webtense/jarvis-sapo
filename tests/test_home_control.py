@@ -397,7 +397,9 @@ async def test_a_no_does_nothing(env):
     # NOT deliberate enough to move something in the real world, and a bare
     # "vale" is the word most easily mistaken for a filler, so it never
     # counts alone — only together with another affirmative.
-    "si", "ok", "okay", "sure", "confirm", "confirmo", "correcto", "vale"])
+    # ("confirm" is NOT here: in English it is one of the deliberate words —
+    # see test_the_yeses_that_do_count — and in Spanish the word is "confirma".)
+    "si", "ok", "okay", "sure", "confirmo", "correcto", "vale"])
 async def test_only_a_plain_yes_counts(env, words):
     await propose(env)
     await announce(env)
@@ -408,7 +410,7 @@ async def test_only_a_plain_yes_counts(env, words):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("words", ["sí", "Sí.", "adelante", "confirma", "confirmado",
                                    "hazlo", "sí, hazlo", "vale hazlo", "yes",
-                                   "do it", "go ahead", "sí por favor"])
+                                   "confirm", "do it", "go ahead", "sí por favor"])
 async def test_the_yeses_that_do_count(env, words):
     await propose(env)
     await announce(env)
