@@ -412,3 +412,18 @@ def test_spanish_words_are_tokenised_whole():
     import speech
     assert speech._tokens("Está cancelado, señor.") == ["está", "cancelado", "señor"]
     assert speech._tokens("Good evening, sir.") == ["good", "evening", "sir"]
+
+
+def test_a_long_text_is_content_not_a_phrase_and_is_left_alone(monkeypatch):
+    """Patterns are quadratic on long input; content is never translated."""
+    import time
+    monkeypatch.setenv("JARVIS_LANGUAGE", "es")
+    long_text = "Opened that file, sir. " + "x " * 40_000
+    start = time.monotonic()
+    assert i18n.t(long_text) is long_text
+    assert time.monotonic() - start < 0.5
+
+
+def test_the_limit_does_not_touch_ordinary_phrases(monkeypatch):
+    monkeypatch.setenv("JARVIS_LANGUAGE", "es")
+    assert i18n.t("Terminal's open in jarvis, sir.") != "Terminal's open in jarvis, sir."

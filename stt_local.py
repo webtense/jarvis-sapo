@@ -77,7 +77,7 @@ FLOOR_ALPHA = 0.05          # how fast the floor follows quiet frames
 
 _PROMPTS = {
     "es": "Conversación con JARVIS, el asistente de la casa. Jarvis, señor.",
-    "en": "A conversation with JARVIS, the house assistant. Jarvis, sir.",
+    "en": "A conversation with JARVIS, the house assistant. Jarvis, at your service.",
 }
 
 
