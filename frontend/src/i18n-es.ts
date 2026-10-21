@@ -431,4 +431,16 @@ export const ES: Record<string, string> = {
   // ── Markdown (markdown.ts) ───────────────────────────────────────────────
   "done": "hecha",
   "not done": "sin hacer",
+  // ── Micrófono (voice.ts, localmic.ts) ────────────────────────────────────
+  "Speech recognition not supported in this browser": "Este navegador no tiene reconocimiento de voz.",
+  "Microphone blocked — retrying. Check this origin's mic permission.": "Micrófono bloqueado; reintentando. Compruebe el permiso del micrófono para esta dirección.",
+  "Another app has taken the microphone — quit it, then reload.": "Otra aplicación ha tomado el micrófono. Ciérrela y recargue la página.",
+  "Speech recognition lost its connection — that sentence was dropped.": "El reconocimiento de voz perdió la conexión; esa frase se ha perdido.",
+  "Microphone stalled — restarting it.": "El micrófono se ha bloqueado; lo reinicio.",
+  "Microphone blocked — check this origin's mic permission.": "Micrófono bloqueado. Compruebe el permiso del micrófono para esta dirección.",
+  "Could not open the microphone.": "No he podido abrir el micrófono.",
+  "Local speech recognition error": "Error del reconocimiento de voz local.",
+  "Local speech recognition could not start; see the server log.": "El reconocimiento de voz local no ha podido arrancar; consulte el registro del servidor.",
+  "Local speech recognition failed; see the server log.": "El reconocimiento de voz local ha fallado; consulte el registro del servidor.",
+  "Local speech recognition is not enabled.": "El reconocimiento de voz local no está activado.",
 };
