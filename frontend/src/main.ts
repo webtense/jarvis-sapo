@@ -5,7 +5,7 @@
  * speech recognition, and audio playback into a single experience.
  */
 
-import { createOrb, type OrbState } from "./orb";
+import { createOrb, type Orb, type OrbState } from "./orb";
 import { createVoiceInput, createAudioPlayer, createMicMonitor } from "./voice";
 import { createSocket } from "./ws";
 import { t } from "./i18n";
@@ -47,7 +47,20 @@ function updateStatus(state: State) {
 // ---------------------------------------------------------------------------
 
 const canvas = document.getElementById("orb-canvas") as HTMLCanvasElement;
-const orb = createOrb(canvas);
+
+// Sin WebGL (Firefox endurecido, un equipo sin GPU ni controladores) three.js
+// lanza al crear el orbe, y ese error detenía todo el script: ni websocket ni
+// micrófono. El orbe es adorno; la voz tiene que seguir funcionando sin él.
+function createOrbSafely(target: HTMLCanvasElement): Orb {
+  try {
+    return createOrb(target);
+  } catch (e) {
+    console.warn("[orb] WebGL is not available; running without the orb", e);
+    return { setState() {}, setAnalyser() {}, destroy() {} };
+  }
+}
+
+const orb = createOrbSafely(canvas);
 
 const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
 const WS_URL = `${wsProto}//${window.location.host}/ws/voice`;
