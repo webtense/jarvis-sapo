@@ -3,6 +3,15 @@
 Fork de [ethanplusai/jarvis](https://github.com/ethanplusai/jarvis) (© 2026 Ethan Rogers) orientado a Ubuntu/Linux.
 Versionado semántico con prefijo `ubuntu-`. Uso personal y no comercial, igual que la licencia original.
 
+## ubuntu-0.6.0 — todo en castellano, Firefox y Chrome
+- **Traducción completa**: textos del servidor (`i18n.py`, `i18n_es.py`, 277 plantillas, tratamiento "señor"; se traduce en las fronteras y nunca el contenido no confiable), interfaz web (361 textos, fechas y plurales es-ES, `frontend/src/i18n.ts`) y documentación (`README.es.md`, `CONTRIBUTING.es.md`, `.env.example` y scripts). Con `JARVIS_LANGUAGE=en` la salida es idéntica a la original.
+- **Ajustes**: la clave de Fish Audio es opcional; el panel muestra el proveedor de voz activo (Piper / Fish / ninguno) y enlaza a https://fish.audio/app/api-keys/.
+- **Firefox y Chrome**: `JARVIS_STT=auto` ofrece la voz local y la página elige (Chrome conserva el reconocimiento del navegador, Firefox usa el local). Verificado con navegadores reales: Firefox abre el micrófono local; Chromium con una frase real de voz llega como turno de usuario.
+- Whisper recibe una guía para escribir "Jarvis" (antes "Harbys").
+- `i18n.t()` no mira textos de más de 1500 caracteres (los patrones son cuadráticos y 60 KB bloqueaban ~2 s el bucle de eventos).
+- `scripts/start-ubuntu.sh` arranca Vite directamente, sin `npm run`.
+- Conocido y pendiente: frases con nombres de fichero/proyecto idénticos a una entrada del catálogo ("later", "nothing") se traducen; las palabras de cancelar/repetir en castellano ("para", "repite") aún no se reconocen; voz real en Firefox sin probar.
+
 ## ubuntu-0.5.0 — voz local, puente MCP, casa en solo lectura
 - **F2c** voz de entrada local opcional (`JARVIS_STT=local`, faster-whisper) y palabra de activación "Hey Jarvis" (openWakeWord, `JARVIS_WAKE_WORD=on`). Desactivado por defecto; sin los paquetes opcionales todo sigue igual. Endpoint `/ws/mic` tras la misma puerta Origin/Host; el texto final entra por `_handle_final_transcript`.
 - **F3** puente MCP para sesiones de Claude Code (`jarvis_speak`, `jarvis_ask_user`, `jarvis_notify`, `jarvis_remember`): token propio y limitado, límites de frecuencia y longitud, texto siempre atribuido y tratado como no confiable. `jarvis_remember` solo propone: el usuario confirma por voz o en el panel, y por voz nunca sustituye una memoria existente.
