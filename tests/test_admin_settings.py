@@ -502,7 +502,9 @@ def test_the_admin_page_builds_no_markup_from_strings():
 
 def test_the_mute_button_is_on_the_main_page_and_not_in_the_menu():
     html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
-    menu = html[html.index('id="menu-dropdown"'):html.index('id="status-text"')]
+    start = html.index('id="menu-dropdown"')
+    menu = html[start:html.index("</div>", start)]
+    assert 'id="btn-settings"' in menu, "the slice is not the menu"
     assert 'id="mute-toggle"' in html
     assert 'id="mute-toggle"' not in menu
     assert 'aria-pressed="false"' in html
