@@ -42,9 +42,9 @@ Igual que `docs/casa-control.md`, adaptado:
 | El propio cerebro, engañado o equivocado | Ejecutar directamente | No hay ninguna herramienta que ejecute. La ejecución vive en una función del servidor que solo se alcanza desde tu "sí" (o desde el panel, si lo activas) |
 | Un "sí" dirigido al cerebro | Que cuente como "sí" a una acción | Las mismas palabras estrictas que `docs/casa-control.md`: en castellano "sí" (con tilde), "hazlo", "adelante", "confirma", "confirmado" (y "vale" solo acompañado de otra); en inglés "yes", "confirm", "do it", "go ahead". "ok", "si" sin tilde, "vale" suelto **no** valen. Activable `JARVIS_GOOGLE_CONFIRM_STRICT=1` para exigir dos de esas palabras juntas |
 | Un ámbito prohibido | Invitar, compartir, borrar, Gmail | Prohibido **por código**, no por configuración: ni siquiera existe el campo en el esquema que la herramienta acepta |
-| Un identificador manipulado | `../../etc/passwd` como `doc_id`, un `task_list` no listado | Solo valen los caracteres de un id de Google; la ruta se construye con parámetros ya validados, nunca con texto crudo del cerebro |
+| Un identificador manipulado | `../../etc/passwd` como `doc_id`, un `task_list` no listado | Solo valen los caracteres de un id de Google (`A-Za-z0-9_-`); la ruta se construye con parámetros ya validados, nunca con texto crudo del cerebro, y además solo se envía si está en la **tabla cerrada** de (método, host, ruta, campos del cuerpo): ni un `DELETE`, ni `permissions`, ni Gmail están en ella. Se comprueba antes de leer el token |
 | Una redirección de Google (o de quien lo suplante) | Hacer que el token viaje a otro servidor | No se sigue ninguna redirección y no se usa proxy |
-| El token de lectura robado o reutilizado | Servir para escribir | El token de escritura es **otro** (`GOOGLE_WRITE_TOKEN_FILE`). Si resulta ser igual que el de lectura, no se envía nada |
+| El token de lectura robado o reutilizado | Servir para escribir | El token de escritura es **otro** (`GOOGLE_WRITE_TOKEN_FILE`). Si resulta ser el mismo fichero, o tiene el mismo `access_token` o el mismo `refresh_token` que el de lectura, no se envía nada |
 | Un run sin supervisión (con Bash) o el cerebro | Heredar el token de escritura por el entorno | `claude_env` quita todas las variables `GOOGLE_WRITE_*` del cerebro y de los runs |
 
 ### Lo que el código NO protege
@@ -52,6 +52,13 @@ Igual que `docs/casa-control.md`, adaptado:
 - **Un proceso de tu mismo usuario con Bash** puede leer el fichero del token
   (es `600`, pero es *tu* usuario), llamar él mismo a la API de Google o
   editar tu lista blanca.
+- **Un cambio sobre algo que ya existe** (`calendar_update`, `task_update`,
+  `task_complete`, `note_append`) se identifica por un id que aporta el
+  cerebro. JARVIS dice **qué cambiaría** ("¿Cambio ese evento del calendario:
+  con el título Nuevo, empezando el jueves…?"), no el título del original, que
+  no consulta. Como leer algo de Google tiñe ese turno, se hace en dos pasos:
+  primero te cuenta lo que ha encontrado y, cuando se lo pides otra vez, lo
+  propone. Si dudas de a cuál se refiere, di "no".
 - **Quien hable cerca del micrófono** puede decir "sí": no hay reconocimiento
   de quién habla. Por eso las acciones son pocas y hay límite por minuto.
 - Una apps OAuth en modo "Testing" (no publicada) en Google Cloud Console
@@ -109,8 +116,9 @@ Es tu fichero. JARVIS no lo crea ni lo edita. Hay un ejemplo inactivo en
   defecto solo tu calendario y tu lista de tareas principales (`"primary"` /
   `"@default"`).
 - `limits.max_per_minute`: de 1 a 10 (3 por defecto).
-- `limits.max_text_chars`: longitud máxima de un título, una descripción, las
-  notas de una tarea o el texto de una nota (1 a 4000, 1500 por defecto).
+- `limits.max_text_chars`: longitud máxima de una descripción, las notas de
+  una tarea o el texto de una nota (1 a 4000, 1500 por defecto). Un título
+  (120) y un lugar (120) tienen su propio tope fijo, para poder decirse enteros.
 - `limits.max_lead_days`: cuántos días en el futuro puede estar un evento o
   una fecha de vencimiento (1 a 3650, 365 por defecto).
 - `panel_confirm`: igual que en el control de la casa — `false` por defecto;
@@ -124,8 +132,11 @@ Es tu fichero. JARVIS no lo crea ni lo edita. Hay un ejemplo inactivo en
 2. El cerebro llama a `google_propose` con los datos exactos. Se valida
    contra tu política, los límites y la lista cerrada de campos. Si no
    encaja, se rechaza y se anota — **no se hace nada** todavía.
-3. JARVIS dice la acción entera: "¿Creo el evento cena con Marta en su
-   calendario, señor?". Solo hay una acción pendiente a la vez.
+3. JARVIS dice la acción entera: "¿Creo el evento Cena con Marta, el jueves 22
+   de octubre, de 21:00 a 22:30, en su calendario, señor?". Un texto largo
+   (descripción, notas, el cuerpo de una nota) se lee hasta 250 caracteres y se
+   dice cuántos quedan ("… y 150 caracteres más"). Solo hay una acción
+   pendiente a la vez.
 4. Contestas "sí" (o "hazlo", "adelante", "confirma", "confirmado"), dentro de
    una ventana corta desde que acabó la frase, y solo si nadie ha hablado por
    medio. Un "no" la descarta.
@@ -137,6 +148,32 @@ Es tu fichero. JARVIS no lo crea ni lo edita. Hay un ejemplo inactivo en
 
 El cerebro nunca sabe si se hizo: se le dice que está pendiente y que acabe su
 turno.
+
+## Detalles que conviene saber
+
+- **Horas.** Una hora sin zona (`2026-10-22T21:00`) es tu hora local y JARVIS
+  le escribe el desfase antes de enviarla; con `Z` o `+02:00` se respeta. Un
+  evento de todo el día usa fechas (`2026-10-22`); su fin es el día siguiente
+  al último, como en Calendar, y la frase hablada dice el último día real. Una
+  tarea solo guarda la **fecha** de vencimiento.
+- **Notas.** Una nota es un documento de Google Docs dentro de "JARVIS Notas":
+  JARVIS crea la carpeta la primera vez (con `drive.file` solo ve lo que él
+  mismo creó, de modo que una carpeta o un documento tuyos con ese nombre no
+  cuentan). Ampliar una nota añade un párrafo **al final**, y antes comprueba
+  que el documento es un Doc vivo (no en la papelera) dentro de esa carpeta;
+  si no, no toca nada (`not_our_note`).
+- **Ningún correo en los textos.** Cualquier campo de texto (título, lugar,
+  descripción, notas, cuerpo) que contenga algo con forma de dirección de
+  correo se rechaza entero: es la defensa contra una invitación o un reparto
+  encubiertos. Si de verdad quieres escribir tu correo en una nota, hazlo tú.
+- **Renovación del token.** Si Google contesta 401, JARVIS renueva el acceso
+  con el `refresh_token` del fichero de escritura y repite la petición una sola
+  vez (un 401 significa que no se ejecutó, así que no puede hacerse dos veces).
+  Si el permiso ha caducado o se revocó, JARVIS dice que hay que renovarlo con
+  `scripts/google-auth.py --write` (`reauth` en el registro).
+- **Qué no comprueba ninguna prueba automática.** Los tests usan una red
+  simulada: no se ha llamado a la API real de Google. La primera acción real
+  conviene hacerla con `JARVIS_GOOGLE_DRYRUN=1` y, luego, con algo inocuo.
 
 ## Modo simulacro
 
@@ -157,7 +194,8 @@ contenido). Se rota a `.log.1` al pasar de 1 MB.
 
 - `confirmed_by`: `voice`, `panel` o `none` (propuestas y rechazos).
 - `result`: `proposed`, `ok`, `dryrun`, `rejected`, `expired`, `http_<código>`,
-  `redirect`, `unreachable`, `not_our_note`, `refused: ...`.
+  `redirect`, `unreachable`, `reauth`, `not_our_note`, `unexpected`,
+  `refused: ...`.
 
 ## Revocar el acceso
 

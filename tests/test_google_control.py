@@ -9,10 +9,12 @@ matching and only after the whole question was heard, that nothing a model,
 a transcript or another session says can perform a write, and that the panel
 is off unless the user's own file turns it on.
 """
+import asyncio
 import importlib
 import io
 import json
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -36,6 +38,10 @@ POLICY = {
     "limits": {"max_per_minute": 2, "max_text_chars": 200, "max_lead_days": 30},
 }
 TASK = {"action": "task_create", "title": "Comprar pan"}
+DAY = date.today() + timedelta(days=3)
+DAY_S = DAY.isoformat()
+EVENT = {"action": "calendar_create", "title": "Cena", "start": DAY_S + "T21:00:00+02:00",
+         "duration_minutes": 90, "location": "Bar Pepe"}
 
 
 class FakeUtt:
@@ -210,7 +216,7 @@ async def test_proposing_asks_aloud_and_sends_nothing(env):
 @pytest.mark.parametrize("args", [
     {"action": "task_create", "title": "x", "attendees": ["a@b.com"]},
     {"action": "task_create", "title": "avisa a juan@example.com"},
-    {"action": "calendar_create", "title": "x", "start": "2026-11-01T10:00:00",
+    {"action": "calendar_create", "title": "x", "start": DAY_S + "T10:00:00",
      "sendUpdates": "all"},
     {"action": "task_create", "task_list": "other", "title": "x"},
     {"action": "note_append", "doc_id": "../../etc/passwd", "text": "x"},
@@ -335,6 +341,100 @@ async def test_no_audit_log_at_the_moment_of_acting_means_no_action(env):
     path.mkdir()
     await say(env, "sí")
     assert env.calls == []
+
+
+# --- the whole action is said, and only then is a "yes" listened for --------------
+
+@pytest.mark.asyncio
+async def test_a_calendar_event_is_said_with_its_day_hours_and_place(env):
+    await propose(env, EVENT)
+    (said,) = [s[0] for s in env.speech.said]
+    assert said.startswith("¿Creo el evento Cena, el ") and "de 21:00 a 22:30" in said
+    assert said.endswith("en Bar Pepe, en su calendario, señor?")
+
+
+@pytest.mark.asyncio
+async def test_a_confirmed_event_is_one_post_with_no_attendees_and_no_notification(env):
+    await propose(env, EVENT)
+    await announce(env)
+    assert await say(env, "sí") is True
+    (call,) = env.calls
+    method, host, path, query, body = call
+    assert (method, host, path) == ("POST", "www.googleapis.com",
+                                    "/calendar/v3/calendars/primary/events")
+    assert query == {"sendUpdates": "none"}
+    assert set(body) == {"summary", "start", "end", "location"}
+
+
+@pytest.mark.asyncio
+async def test_a_yes_is_not_listened_for_while_the_brain_is_still_talking(env, monkeypatch):
+    monkeypatch.setattr(bridge, "SPEAK_WAIT_MAX", 0.2)
+    lock = asyncio.Lock()
+    await lock.acquire()
+    env.server.brain_instance = SimpleNamespace(_turn_lock=lock)
+    await propose(env)
+    pid = googles(env)[0].id
+    await env.server._bridge_announced_when_spoken(pid, FakeUtt(), env.server.bridge_state.brain_epoch)
+    assert await say(env, "sí") is False and env.calls == [] and len(googles(env)) == 1
+    lock.release()
+    await env.server._bridge_announced_when_spoken(pid, FakeUtt(), env.server.bridge_state.brain_epoch)
+    assert await say(env, "sí") is True and len(env.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_anything_else_said_after_the_question_disarms_it(env):
+    await propose(env)
+    await announce(env)
+    env.server.bridge_state.note_brain_turn()       # the brain started talking
+    assert await say(env, "sí") is False
+    assert env.calls == [] and len(googles(env)) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("words", ["qué hora es", "sí, pero a las nueve", "vale", "ok", "si",
+                                   "claro", "yes no", "hazlo no"])
+async def test_what_is_not_a_plain_yes_is_not_one(env, words):
+    await propose(env)
+    await announce(env)
+    assert await say(env, words) is False
+    assert env.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("words", ["sí", "hazlo", "adelante", "confirma", "vale, hazlo",
+                                   "yes", "do it"])
+async def test_the_strict_yes_words_do_it(env, words):
+    await propose(env)
+    await announce(env)
+    assert await say(env, words) is True and len(env.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_opt_in_strict_mode_asks_for_two_words(env, monkeypatch):
+    monkeypatch.setenv("JARVIS_GOOGLE_CONFIRM_STRICT", "1")
+    await propose(env)
+    await announce(env)
+    assert await say(env, "sí") is False and env.calls == []
+    assert await say(env, "sí, hazlo") is True and len(env.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_outcome_sentences(env, monkeypatch):
+    sentences = {}
+    for code, text in (("not_our_note", "Esa no es una de mis notas, señor"),
+                       ("reauth", "El permiso de Google ha caducado, señor"),
+                       ("http_403", "Google lo ha rechazado, señor."),
+                       ("unreachable", "No he podido contactar con Google, señor."),
+                       ("GOOGLE_WRITE_TOKEN_FILE is not set.", "no está bien configurada")):
+        monkeypatch.setattr(google_actions, "perform",
+                            lambda a, code=code: google_actions.Outcome(False, code))
+        await propose(env)
+        await announce(env)
+        pid = googles(env)[0].id
+        sentences[code] = await env.server._google_decide(pid, True, via="voice")
+        assert text in sentences[code], (code, sentences[code])
+        env.now[0] += 120
+        env.server.google_limits = google_actions.Limits(lambda: env.now[0])
 
 
 # --- the panel ------------------------------------------------------------------

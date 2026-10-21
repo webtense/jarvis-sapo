@@ -6612,7 +6612,7 @@ async def _bridge_announced_when_spoken(pid: str, utt, epoch: int) -> None:
         return
     if ok:
         pending = bridge_state.proposals.get(pid)
-        if pending is not None and pending.kind == "home":
+        if pending is not None and pending.kind in ("home", "google"):
             # The question was asked from INSIDE a brain turn, which may still
             # be talking. A "yes" is the user's answer to the question only
             # once the brain has finished: until then it might be answering
@@ -7002,6 +7002,11 @@ async def _google_decide(pid: str, accept: bool, *, via: str) -> str:
         return i18n.t("Done, sir.")
     if outcome.code == "unreachable":
         return i18n.t("I couldn't reach Google, sir.")
+    if outcome.code == "not_our_note":
+        return i18n.t("That isn't one of my notes, sir, so I haven't touched it.")
+    if outcome.code == "reauth":
+        return i18n.t("Google's permission has expired, sir. It has to be renewed "
+                      "with the authorisation script.")
     if outcome.code.startswith(("http_", "redirect")):
         return i18n.t("Google refused it, sir.")
     return i18n.t("I couldn't do that, sir: the Google connection is not set up properly.")

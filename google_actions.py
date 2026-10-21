@@ -8,7 +8,7 @@ allow-list, `data_paths.google_actions_path()`) there are no actions: not
 Scope, on purpose and nothing more (see `docs/google-escritura.md`):
 
   * Calendar: create an event, update one JARVIS can identify by id (title,
-    time, location, description). No attendees, no `sendUpdates` other than
+    time, location, description). No attendees, `sendUpdates` is always
     `none`, no deletion, no sharing.
   * Tasks: create, update title/notes/due, mark complete. No deletion.
   * Notes: a Google Doc created by JARVIS inside a Drive folder named
@@ -19,41 +19,48 @@ Scope, on purpose and nothing more (see `docs/google-escritura.md`):
 
 What this module guarantees, the same way `home_actions.py` does:
 
-  * Only a CLOSED list of hosts and paths, built by this code from validated
-    parameters, is ever requested (`_PATHS`). Nothing the brain writes
-    becomes a path or a raw request body.
-  * A proposal containing `attendees`, a share/permission field, or any
-    string that looks like a third party's email address is refused before
-    any network call.
+  * Only a CLOSED table of (method, host, path, body keys) is ever requested
+    (`_ALLOWED`). `_request` checks it BEFORE reading the token or opening a
+    socket, so a path built from anything else is refused, not "sanitised".
+    A DELETE, a permissions call or a Gmail host is not in the table.
+  * Bodies are built here from validated fields. A proposal containing
+    `attendees`, a share/permission field, or something that looks like a
+    third party's email address in any text field is refused whole.
   * Its own token (`GOOGLE_WRITE_TOKEN_FILE`, a 0600 file). It is never the
-    read token (`GOOGLE_TOKEN_FILE`): if both hold the same value, nothing is
-    sent.
+    read token (`GOOGLE_TOKEN_FILE`): if both files hold the same access or
+    refresh token, nothing is sent.
   * The user decides, not a model: this module only describes and performs an
     `Action`. The proposal, the spoken question and the "yes" live in
-    `server.py` and `bridge.py`.
+    `server.py` and `bridge.py`, and nothing in here is reachable from a tool
+    call except the PROPOSAL (`Policy.check`), which sends nothing.
   * Every attempt is one JSONL line in `google-actions.log`, without a token
     or a full text body. If that log cannot be written, nothing is done.
   * A frequency limit and a dry-run mode (`JARVIS_GOOGLE_DRYRUN=1`).
+  * No redirect is followed and no proxy is used: the bearer token goes to
+    Google and to nobody in between.
 
-What it does NOT protect against (see docs/google-escritura.md): a process of
-the same user with Bash can read the 0600 token file, audio ambiente puede
-decir "sí", and an OAuth app in "Testing" mode may expire its refresh token
-after 7 days (an unconfirmed hypothesis).
+What it does NOT protect against (docs/google-escritura.md): a process of the
+same user with Bash can read the 0600 token file; ambient audio can say "yes";
+an OAuth app left in "Testing" may lose its refresh token after 7 days (an
+unconfirmed hypothesis); and an event, task or note is identified by an id the
+brain supplies, so for an update the user hears what would change, not the
+current title of what it is applied to.
 """
 
 from __future__ import annotations
 
 import hmac
 import json
+import os
 import re
 import stat
-import os
+import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 import bridge
@@ -64,30 +71,40 @@ import lang
 TIMEOUT_SEC = 10.0
 POLICY_MAX_BYTES = 64 * 1024
 LOG_MAX_BYTES = 1024 * 1024
-RESPONSE_MAX_BYTES = 64 * 1024
+RESPONSE_MAX_BYTES = 512 * 1024         # read and parsed, never spoken
 
 DEFAULT_PER_MINUTE = 3
 MAX_PER_MINUTE = 10
 PROPOSALS_PER_5_MIN = 6
 
-TITLE_MAX_HARD = 300
+TITLE_MAX = 120                         # a title is spoken whole, so it is short
+PLACE_MAX = 120
 TEXT_MAX_HARD = 4000
 DEFAULT_TEXT_MAX = 1500
 DEFAULT_LEAD_DAYS = 365
 LEAD_DAYS_HARD_MAX = 3650
+MAX_DURATION_MINUTES = 24 * 60 * 14
+SPOKEN_TEXT_MAX = 250                   # how much of a long text is read aloud
 
 NOTES_FOLDER_NAME = "JARVIS Notas"
+FOLDER_MIME = "application/vnd.google-apps.folder"
+DOC_MIME = "application/vnd.google-apps.document"
 
+# One host serves Calendar and Drive (`www.googleapis.com`).
 CALENDAR_HOST = "www.googleapis.com"
+DRIVE_HOST = "www.googleapis.com"
 TASKS_HOST = "tasks.googleapis.com"
 DOCS_HOST = "docs.googleapis.com"
 
-_ID_RE = re.compile(r"[A-Za-z0-9_@.\-]{1,512}")
-_CAL_ID_RE = re.compile(r"[A-Za-z0-9_@.\-]{1,255}")
-_NAME_BAD_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+_ID_RE = re.compile(r"[A-Za-z0-9_\-]{1,200}")
+_LIST_RE = re.compile(r"@default|[A-Za-z0-9_\-]{1,200}")
+_CAL_ID_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_@.\-]{0,254}")
+_NAME_BAD_RE = re.compile(r"[\x00-\x1f\x7f-\x9f  ]")
+_LONG_BAD_RE = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f  ]")
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 _DATETIME_RE = re.compile(
-    r"\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(Z|[+-]\d{2}:\d{2})?)?")
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}"
+    r"(T[0-9]{2}:[0-9]{2}(:[0-9]{2})?(\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})?)?")
 
 ACTIONS = frozenset({
     "calendar_create", "calendar_update",
@@ -111,11 +128,16 @@ _FIELDS: dict[str, dict[str, bool]] = {
     "note_append": {"doc_id": True, "text": True},
 }
 
+# Text fields: an email address in any of them refuses the proposal.
+_TEXT_KEYS = ("title", "location", "notes", "description", "body", "text")
+_MULTILINE_KEYS = ("notes", "description", "body", "text")
+
 # Keys forbidden in ANY payload, whatever the action: no attendee, no sharing,
 # no permission change reaches this module even if the brain tries.
 _FORBIDDEN_KEYS = frozenset({
     "attendees", "sendUpdates", "send_updates", "permissions", "role",
     "type", "anyoneWithLink", "shared", "writersCanShare", "visibility",
+    "delete", "trash", "cc", "bcc", "to", "recipients", "guests",
 })
 
 
@@ -142,7 +164,6 @@ class Action:
     perform it, nothing from outside unchecked."""
     kind: str                      # one of ACTIONS
     fields: tuple = ()              # sorted ((name, value), ...), values are str/int
-    name: str = ""                  # short label for the spoken sentence
 
     def as_dict(self) -> dict:
         return {"kind": self.kind, "fields": dict(self.fields)}
@@ -161,9 +182,9 @@ class Policy:
     panel_confirm: bool = False
     problems: list = field(default_factory=list)
 
-    def check(self, kind, raw: dict) -> Action:
+    def check(self, kind, raw) -> Action:
         """The validated Action, or `Refused`. Sends nothing."""
-        if kind not in ACTIONS:
+        if not isinstance(kind, str) or kind not in ACTIONS:
             raise Refused(f"{_safe_key(kind)} is not an action JARVIS can propose.")
         if not isinstance(raw, dict):
             raise Refused("The parameters must be an object.")
@@ -176,23 +197,22 @@ class Policy:
         out: dict[str, object] = {}
         for key, required in wanted.items():
             value = raw.get(key)
-            if value in (None, ""):
+            if value is None or (isinstance(value, str) and not value.strip()):
                 if required:
                     raise Refused(f"{kind} needs {key}.")
                 continue
-            out[key] = self._one(kind, key, value)
+            out[key] = self._one(key, value)
         self._cross_check(kind, out)
-        name = _label(kind, out)
-        return Action(kind, tuple(sorted(out.items())), name)
+        return Action(kind, tuple(sorted(out.items())))
 
-    def _one(self, kind: str, key: str, value):
-        if key in ("calendar_id",):
+    def _one(self, key: str, value):
+        if key == "calendar_id":
             cal = _clean_id(value, _CAL_ID_RE, "calendar_id")
             if cal not in self.calendars:
                 raise Refused(f"{cal} is not in the user's list of allowed calendars.")
             return cal
         if key == "task_list":
-            tl = _clean_id(value, _ID_RE, "task_list")
+            tl = _clean_id(value, _LIST_RE, "task_list")
             if tl not in self.task_lists:
                 raise Refused(f"{tl} is not in the user's list of allowed task lists.")
             return tl
@@ -202,14 +222,30 @@ class Policy:
             return _clean_datetime(value, key, self.max_lead_days)
         if key == "duration_minutes":
             return _clean_minutes(value)
-        if key in ("title", "location", "notes", "description", "body", "text"):
-            limit = TITLE_MAX_HARD if key in ("title",) else self.max_text_chars
+        if key in _TEXT_KEYS:
+            if key == "title":
+                limit = TITLE_MAX
+            elif key == "location":
+                limit = PLACE_MAX
+            else:
+                limit = self.max_text_chars
             return _clean_text(value, key, limit)
         raise Refused("That parameter is not allowed.")       # unreachable
 
     def _cross_check(self, kind: str, out: dict) -> None:
-        if kind == "calendar_create" and "end" not in out and "duration_minutes" not in out:
-            raise Refused("calendar_create needs end or duration_minutes.")
+        if kind == "calendar_create":
+            if "end" in out and "duration_minutes" in out:
+                raise Refused("calendar_create takes end or duration_minutes, not both.")
+            all_day = len(out["start"]) == 10
+            if all_day and "duration_minutes" in out:
+                raise Refused("An all-day event takes an end date, not a duration.")
+            if not all_day and "end" not in out and "duration_minutes" not in out:
+                raise Refused("calendar_create needs end or duration_minutes.")
+        if kind in ("calendar_create", "calendar_update") and "start" in out and "end" in out:
+            if (len(out["start"]) == 10) != (len(out["end"]) == 10):
+                raise Refused("start and end must both be dates or both be date-times.")
+            if _as_utc(out["end"]) <= _as_utc(out["start"]):
+                raise Refused("The event must end after it starts.")
         if kind == "calendar_update" and len(out) <= (2 if "calendar_id" in out else 1):
             raise Refused("calendar_update needs at least one field to change.")
         if kind == "task_update" and len(out) <= (2 if "task_list" in out else 1):
@@ -217,14 +253,10 @@ class Policy:
 
 
 def _check_forbidden(raw: dict) -> None:
-    bad = sorted(k for k in raw if k in _FORBIDDEN_KEYS)
+    bad = sorted(str(k) for k in raw if k in _FORBIDDEN_KEYS)
     if bad:
         raise Refused("Not permitted on this connection: " +
                       ", ".join(_safe_key(k) for k in bad) + ".")
-    for value in raw.values():
-        if isinstance(value, str) and _EMAIL_RE.search(value):
-            raise Refused("A proposal that contains an email address is refused: "
-                          "no attendee, no sharing, ever.")
 
 
 def _safe_key(key) -> str:
@@ -238,52 +270,78 @@ def _clean_id(value, pattern: re.Pattern, label: str) -> str:
 
 
 def _clean_text(value, key: str, limit: int) -> str:
+    """Untrusted text, reduced to something safe to speak, show and send."""
     if not isinstance(value, str):
         raise Refused(f"{key} must be text.")
-    text = _NAME_BAD_RE.sub(" ", value).strip()
+    if len(value) > limit * 4 + 16:                  # no regex over a megabyte
+        raise Refused(f"{key} is too long (max {limit} characters).")
+    text = value.replace("\r\n", "\n").replace("\r", "\n")
+    if key in _MULTILINE_KEYS:
+        text = _LONG_BAD_RE.sub(" ", text)
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r" ?\n ?", "\n", text)
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    else:
+        text = re.sub(r"\s+", " ", _NAME_BAD_RE.sub(" ", text)).strip()
     if not text:
         raise Refused(f"{key} cannot be empty.")
     if len(text) > limit:
         raise Refused(f"{key} is too long (max {limit} characters).")
+    if _EMAIL_RE.search(text):
+        raise Refused("A proposal that contains an email address is refused: "
+                      "no attendee, no sharing, ever.")
     return text
 
 
+def _parse_when(value: str) -> datetime:
+    """An aware datetime for a value `_clean_datetime` accepted. A bare date
+    is midnight UTC (it is only ever compared, never sent as a time)."""
+    if len(value) == 10:
+        return datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    return datetime.fromisoformat(value)
+
+
+def _as_utc(value: str) -> datetime:
+    return _parse_when(value).astimezone(timezone.utc)
+
+
 def _clean_datetime(value, key: str, max_lead_days: int) -> str:
-    if not isinstance(value, str) or not _DATETIME_RE.fullmatch(value.strip()):
+    """A date (`2026-10-21`) or a date-time with seconds and an offset
+    (`2026-10-21T18:00:00+02:00`). A time given without an offset is the
+    user's own local time: the offset is written in, so Google never has to
+    guess a zone."""
+    if (not isinstance(value, str) or not value.strip().isascii()
+            or not _DATETIME_RE.fullmatch(value.strip())):
         raise Refused(f"{key} must be an ISO date or date-time "
                       "(e.g. 2026-10-21 or 2026-10-21T18:00:00+02:00).")
     value = value.strip()
     try:
-        probe = value if "T" in value else value + "T00:00:00"
-        probe = probe[:19]
-        when = datetime.strptime(probe, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
-    except ValueError:
+        if "T" not in value:
+            when = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            clean = value
+        else:
+            parsed = datetime.fromisoformat(value)
+            aware = parsed if parsed.tzinfo is not None else parsed.astimezone()
+            aware = aware.replace(microsecond=0)
+            clean = aware.isoformat(timespec="seconds")
+            when = aware
+    except (ValueError, OverflowError, OSError):
         raise Refused(f"{key} is not a valid date.") from None
     lead = max(1, min(max_lead_days, LEAD_DAYS_HARD_MAX))
-    if when > datetime.now(timezone.utc) + timedelta(days=lead):
+    if when.astimezone(timezone.utc) > datetime.now(timezone.utc) + timedelta(days=lead):
         raise Refused(f"{key} is further ahead than the {lead}-day limit the user set.")
-    return value
+    return clean
 
 
 def _clean_minutes(value) -> int:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise Refused("duration_minutes must be a number.")
+    if value != value or value in (float("inf"), float("-inf")):
+        raise Refused("duration_minutes must be a finite number.")
     minutes = int(value)
-    if not 1 <= minutes <= 24 * 60 * 14:
-        raise Refused("duration_minutes must be between 1 and 20160 (two weeks).")
+    if not 1 <= minutes <= MAX_DURATION_MINUTES:
+        raise Refused(f"duration_minutes must be between 1 and {MAX_DURATION_MINUTES} (two weeks).")
     return minutes
-
-
-def _label(kind: str, out: dict) -> str:
-    if "title" in out:
-        return out["title"][:60]
-    if "doc_id" in out:
-        return "la nota"
-    if "event_id" in out:
-        return "el evento"
-    if "task_id" in out:
-        return "la tarea"
-    return "eso"
 
 
 # ---------------------------------------------------------------------------
@@ -332,33 +390,25 @@ def load_policy(path=None) -> Policy:
     return _parse_policy(data)
 
 
+def _id_list(data: dict, key: str, default: str, pattern: re.Pattern,
+             problems: list) -> frozenset:
+    listed = data.get(key, [default])
+    if not isinstance(listed, list) or not listed:
+        problems.append(f"{key}: not a list; using [\"{default}\"].")
+        listed = [default]
+    keep = set()
+    for item in listed:
+        if isinstance(item, str) and item.isascii() and pattern.fullmatch(item):
+            keep.add(item)
+        else:
+            problems.append(f"{key}: an invalid id was ignored.")
+    return frozenset(keep or {default})
+
+
 def _parse_policy(data: dict) -> Policy:
     problems: list[str] = []
-    cals = data.get("calendars", ["primary"])
-    if not isinstance(cals, list) or not cals:
-        problems.append("calendars: not a list; using [\"primary\"].")
-        cals = ["primary"]
-    calendars = set()
-    for c in cals:
-        if isinstance(c, str) and c.isascii() and _CAL_ID_RE.fullmatch(c):
-            calendars.add(c)
-        else:
-            problems.append("calendars: an invalid id was ignored.")
-    if not calendars:
-        calendars = {"primary"}
-
-    lists = data.get("task_lists", ["@default"])
-    if not isinstance(lists, list) or not lists:
-        problems.append("task_lists: not a list; using [\"@default\"].")
-        lists = ["@default"]
-    task_lists = set()
-    for tl in lists:
-        if isinstance(tl, str) and tl.isascii() and _ID_RE.fullmatch(tl):
-            task_lists.add(tl)
-        else:
-            problems.append("task_lists: an invalid id was ignored.")
-    if not task_lists:
-        task_lists = {"@default"}
+    calendars = _id_list(data, "calendars", "primary", _CAL_ID_RE, problems)
+    task_lists = _id_list(data, "task_lists", "@default", _LIST_RE, problems)
 
     limits = data.get("limits") if isinstance(data.get("limits"), dict) else {}
     per_min = limits.get("max_per_minute", DEFAULT_PER_MINUTE)
@@ -376,7 +426,7 @@ def _parse_policy(data: dict) -> Policy:
         problems.append("limits.max_lead_days is not valid; using the default.")
         lead = DEFAULT_LEAD_DAYS
 
-    return Policy(calendars=frozenset(calendars), task_lists=frozenset(task_lists),
+    return Policy(calendars=calendars, task_lists=task_lists,
                   max_per_minute=per_min, max_text_chars=max_text, max_lead_days=lead,
                   panel_confirm=data.get("panel_confirm") is True, problems=problems)
 
@@ -384,32 +434,175 @@ def _parse_policy(data: dict) -> Policy:
 # ---------------------------------------------------------------------------
 # What is said
 # ---------------------------------------------------------------------------
+#
+# The frames are English with their Spanish pair in i18n_es.py. What goes in a
+# `{slot}` is either the user's own words as validated above (copied, never
+# translated) or a phrase built here in the spoken language (a date, "and 40
+# more characters"), so the whole action is heard before the user answers.
+
+_MONTHS = {
+    "en": ("January", "February", "March", "April", "May", "June", "July",
+           "August", "September", "October", "November", "December"),
+    "es": ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+           "agosto", "septiembre", "octubre", "noviembre", "diciembre"),
+}
+_WEEKDAYS = {
+    "en": ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"),
+    "es": ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"),
+}
+
+
+def _es() -> bool:
+    return lang.language() == "es"
+
+
+def _day_bare(day: date) -> str:
+    """"jueves 22 de octubre" / "Thursday 22 October": no article, no "on"."""
+    if _es():
+        return f"{_WEEKDAYS['es'][day.weekday()]} {day.day} de {_MONTHS['es'][day.month - 1]}"
+    return f"{_WEEKDAYS['en'][day.weekday()]} {day.day} {_MONTHS['en'][day.month - 1]}"
+
+
+def _day_text(day: date) -> str:
+    return ("el " if _es() else "on ") + _day_bare(day)
+
+
+def _day_of(value: str) -> date:
+    return date.fromisoformat(value[:10])
+
+
+def _clock_of(value: str) -> str:
+    return value[11:16]
+
+
+def _when_text(start: str, end: Optional[str]) -> str:
+    """When, in words, from validated start/end (dates or date-times)."""
+    es = _es()
+    if len(start) == 10:                                  # all day; `end` is exclusive
+        first = _day_of(start)
+        last = _day_of(end) - timedelta(days=1) if end else first
+        if last > first:
+            if es:
+                return f"del {_day_bare(first)} al {_day_bare(last)}, todo el día"
+            return f"from {_day_bare(first)} to {_day_bare(last)}, all day"
+        return f"{_day_text(first)}, {'todo el día' if es else 'all day'}"
+    day = _day_text(_day_of(start))
+    if not end:
+        return f"{day} {'a las' if es else 'at'} {_clock_of(start)}"
+    if _day_of(end) == _day_of(start):
+        if es:
+            return f"{day}, de {_clock_of(start)} a {_clock_of(end)}"
+        return f"{day}, from {_clock_of(start)} to {_clock_of(end)}"
+    if es:
+        return (f"{day} a las {_clock_of(start)}, hasta {_day_text(_day_of(end))} "
+                f"a las {_clock_of(end)}")
+    return (f"{day} at {_clock_of(start)}, until {_day_text(_day_of(end))} "
+            f"at {_clock_of(end)}")
+
+
+def _excerpt(text: str) -> str:
+    """Up to SPOKEN_TEXT_MAX characters of a text, then how much was left out,
+    so a long text is never silently shortened."""
+    one = " ".join(text.split())
+    if len(one) <= SPOKEN_TEXT_MAX:
+        return one
+    left = len(one) - SPOKEN_TEXT_MAX
+    cut = one[:SPOKEN_TEXT_MAX].rstrip()
+    if _es():
+        return f"{cut}… y {left} caracteres más"
+    return f"{cut}… and {left} more characters"
+
+
+def _end_for_speech(f: dict) -> Optional[str]:
+    if f.get("end"):
+        return f["end"]
+    if f.get("duration_minutes") and len(f.get("start", "")) > 10:
+        return _plus_minutes(f["start"], f["duration_minutes"])
+    if len(f.get("start", "")) == 10:
+        return (_day_of(f["start"]) + timedelta(days=1)).isoformat()
+    return None
+
+
+def _calendar_detail(f: dict, *, creating: bool) -> str:
+    es = _es()
+    parts = []
+    if creating:
+        parts.append(_when_text(f["start"], _end_for_speech(f)))
+    else:
+        if "title" in f:
+            parts.append(f"con el título {f['title']}" if es else f"titled {f['title']}")
+        if "start" in f:
+            parts.append(("empezando " if es else "starting ")
+                         + _when_text(f["start"], f.get("end")))
+        elif "end" in f:
+            parts.append(("terminando " if es else "ending ")
+                         + _when_text(f["end"], None))
+    if "location" in f:
+        parts.append(f"en {f['location']}" if es else f"at {f['location']}")
+    if "description" in f:
+        parts.append(f"con la descripción {_excerpt(f['description'])}" if es
+                     else f"with the description {_excerpt(f['description'])}")
+    cal = f.get("calendar_id")
+    if cal and cal != "primary":
+        parts.append(f"en el calendario {cal}" if es else f"in the calendar {cal}")
+    return ", ".join(parts)
+
+
+def _task_detail(f: dict, *, with_title: bool) -> str:
+    es = _es()
+    parts = []
+    if with_title and "title" in f:
+        parts.append(f"con el título {f['title']}" if es else f"titled {f['title']}")
+    if "due" in f:
+        parts.append(f"para {_day_text(_day_of(f['due']))}" if es
+                     else f"due {_day_text(_day_of(f['due']))}")
+    if "notes" in f:
+        parts.append(f"con las notas {_excerpt(f['notes'])}" if es
+                     else f"with the notes {_excerpt(f['notes'])}")
+    return ", ".join(parts)
+
 
 def question(action: Action) -> str:
     """The whole action, as the sentence JARVIS says before anything happens.
     Built only from the validated Action: never raw text from the brain."""
-    k = action.kind
+    k, f = action.kind, dict(action.fields)
     if k == "calendar_create":
-        english = "Shall I create the event {name} in your calendar, sir?"
+        english = ("Shall I create the event {name}, {detail}, in your "
+                   "calendar, sir?").format(
+            name=f["title"], detail=_calendar_detail(f, creating=True))
     elif k == "calendar_update":
-        english = "Shall I update the event {name} in your calendar, sir?"
+        english = "Shall I change that calendar event: {detail}, sir?".format(
+            detail=_calendar_detail(f, creating=False))
     elif k == "task_create":
-        english = "Shall I add {name} to your tasks, sir?"
+        detail = _task_detail(f, with_title=False)
+        if detail:
+            english = "Shall I add {name} to your tasks, {detail}, sir?".format(
+                name=f["title"], detail=detail)
+        else:
+            english = "Shall I add {name} to your tasks, sir?".format(name=f["title"])
     elif k == "task_update":
-        english = "Shall I update the task {name}, sir?"
+        english = "Shall I change that task: {detail}, sir?".format(
+            detail=_task_detail(f, with_title=True))
     elif k == "task_complete":
-        english = "Shall I mark the task {name} as complete, sir?"
+        english = "Shall I mark that task as complete, sir?"
     elif k == "note_create":
-        english = "Shall I create a note titled {name} in your Drive, sir?"
+        if "body" in f:
+            english = ("Shall I create a note titled {name} in your Drive, "
+                       "saying {detail}, sir?").format(
+                name=f["title"], detail=_excerpt(f["body"]))
+        else:
+            english = ("Shall I create a note titled {name} in your Drive, sir?"
+                       ).format(name=f["title"])
     elif k == "note_append":
-        english = "Shall I add that text to {name}, sir?"
+        english = "Shall I add this to that note in your Drive: {detail}, sir?".format(
+            detail=_excerpt(f["text"]))
     else:
         english = "Shall I do that in Google, sir?"            # unreachable
-    return i18n.t(english.format(name=action.name))
+    return i18n.t(english)
 
 
 # ---------------------------------------------------------------------------
-# Credentials and the closed set of requests
+# Credentials and the closed table of requests
 # ---------------------------------------------------------------------------
 
 def _read_secret_file(path: str, label: str) -> str:
@@ -420,7 +613,7 @@ def _read_secret_file(path: str, label: str) -> str:
         if st.st_mode & 0o077:
             raise GoogleActionError(f"{label} must not be readable by group or others (chmod 600).")
         with open(path, encoding="utf-8") as fh:
-            return fh.read(8192)
+            return fh.read(16384)
     except OSError:
         raise GoogleActionError(f"{label} cannot be read.") from None
 
@@ -441,13 +634,19 @@ def _read_token_data() -> tuple[str, dict]:
         raise GoogleActionError("GOOGLE_WRITE_TOKEN_FILE is not valid JSON.") from None
     if not isinstance(data, dict) or not data.get("access_token"):
         raise GoogleActionError("GOOGLE_WRITE_TOKEN_FILE has no access_token.")
-    _refuse_the_read_token(data.get("access_token", ""), path)
+    _refuse_the_read_token(data, path)
     return path, data
 
 
-def _refuse_the_read_token(write_access_token: str, write_path: str) -> None:
-    """The write credential's file and access token must differ from the
-    read-only connection's, the same defence `home_actions.py` applies."""
+def _same(a, b) -> bool:
+    return bool(a) and bool(b) and isinstance(a, str) and isinstance(b, str) and \
+        hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+
+
+def _refuse_the_read_token(write_data: dict, write_path: str) -> None:
+    """The write credential must be a different grant from the read-only
+    connection's, the same defence `home_actions.py` applies: not the same
+    file, and neither the same access token nor the same refresh token."""
     read_path = os.environ.get("GOOGLE_TOKEN_FILE", "").strip()
     if not read_path:
         return
@@ -457,18 +656,17 @@ def _refuse_the_read_token(write_access_token: str, write_path: str) -> None:
     except OSError:
         pass
     try:
-        read_raw = _read_secret_file(read_path, "GOOGLE_TOKEN_FILE")
-        read_data = json.loads(read_raw)
-        read_token = read_data.get("access_token", "") if isinstance(read_data, dict) else ""
+        read_data = json.loads(_read_secret_file(read_path, "GOOGLE_TOKEN_FILE"))
     except (GoogleActionError, ValueError):
         return
-    if read_token and write_access_token and hmac.compare_digest(
-            read_token.encode("utf-8"), write_access_token.encode("utf-8")):
-        raise GoogleActionError("The write token must not be the read-only token.")
+    if not isinstance(read_data, dict):
+        return
+    for key in ("access_token", "refresh_token"):
+        if _same(read_data.get(key), write_data.get(key)):
+            raise GoogleActionError("The write token must not be the read-only token.")
 
 
 def _write_token_data(path: str, data: dict) -> None:
-    import tempfile
     directory = os.path.dirname(path) or "."
     fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".google_write_")
     try:
@@ -485,16 +683,20 @@ def _write_token_data(path: str, data: dict) -> None:
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse every redirect: the default handler would resend the
+    Authorization header to whatever host the 3xx names."""
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
 
 
+# ProxyHandler({}) = no proxy at all, whatever http_proxy says.
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
 
 
 def _open(req: urllib.request.Request, timeout: float):
     """The network seam; tests replace it."""
-    return _OPENER.open(req, timeout=timeout)  # noqa: S310 (host/path checked by callers)
+    return _OPENER.open(req, timeout=timeout)  # noqa: S310 (host/path checked by _check_call)
 
 
 _TOKEN_URI = "https://oauth2.googleapis.com/token"  # gitleaks:allow (an endpoint, not a secret)
@@ -507,7 +709,7 @@ def _refresh_access_token(data: dict) -> dict:
     client_id = data.get("client_id")
     client_secret = data.get("client_secret")
     if not (refresh_token and client_id and client_secret):
-        raise GoogleActionError("GOOGLE_WRITE_TOKEN_FILE is missing fields needed to renew access.")
+        raise GoogleActionError("reauth")
     body = urllib.parse.urlencode({
         "grant_type": "refresh_token", "refresh_token": refresh_token,
         "client_id": client_id, "client_secret": client_secret}).encode("ascii")
@@ -522,32 +724,91 @@ def _refresh_access_token(data: dict) -> dict:
     except urllib.error.HTTPError as e:
         try:
             payload = json.loads(e.read(8192))
-        except (ValueError, OSError):
+        except (ValueError, OSError, AttributeError):
             payload = {}
-        if payload.get("error") == "invalid_grant":
-            raise GoogleActionError("Google refused to renew write access: "
-                                    "reauthorise with scripts/google-auth.py --write.") from None
-        raise GoogleActionError("Google refused to renew write access (HTTP %d)." % e.code) from None
+        if isinstance(payload, dict) and payload.get("error") == "invalid_grant":
+            raise GoogleActionError("reauth") from None
+        raise GoogleActionError(f"token_http_{e.code}") from None
     except (urllib.error.URLError, OSError, TimeoutError):
-        raise GoogleActionError("Google's authorisation server is unreachable.") from None
+        raise GoogleActionError("unreachable") from None
     try:
         payload = json.loads(raw)
     except ValueError:
-        raise GoogleActionError("Google sent something unreadable while renewing access.") from None
-    new_access = payload.get("access_token")
+        raise GoogleActionError("unreadable") from None
+    new_access = payload.get("access_token") if isinstance(payload, dict) else None
     if not new_access:
-        raise GoogleActionError("Google refused to renew write access: "
-                                "reauthorise with scripts/google-auth.py --write.")
+        raise GoogleActionError("reauth")
     out = dict(data)
     out["access_token"] = new_access
     return out
 
 
+# The ENTIRE surface: (method, host, path pattern, body keys). Anything else
+# is refused before the token is read. Patterns are matched with `fullmatch`.
+_CAL = r"[A-Za-z0-9_][A-Za-z0-9_@.\-]{0,254}"
+_OBJ = r"[A-Za-z0-9_\-]{1,200}"
+_LST = r"(?:@default|[A-Za-z0-9_\-]{1,200})"
+_EVENT_KEYS = frozenset({"summary", "start", "end", "location", "description"})
+_ALLOWED: tuple = (
+    ("POST", CALENDAR_HOST, re.compile(rf"/calendar/v3/calendars/{_CAL}/events"), _EVENT_KEYS),
+    ("PATCH", CALENDAR_HOST, re.compile(rf"/calendar/v3/calendars/{_CAL}/events/{_OBJ}"), _EVENT_KEYS),
+    ("POST", TASKS_HOST, re.compile(rf"/tasks/v1/lists/{_LST}/tasks"),
+     frozenset({"title", "notes", "due"})),
+    ("PATCH", TASKS_HOST, re.compile(rf"/tasks/v1/lists/{_LST}/tasks/{_OBJ}"),
+     frozenset({"title", "notes", "due", "status"})),
+    ("GET", DRIVE_HOST, re.compile(r"/drive/v3/files"), frozenset()),
+    ("GET", DRIVE_HOST, re.compile(rf"/drive/v3/files/{_OBJ}"), frozenset()),
+    ("POST", DRIVE_HOST, re.compile(r"/drive/v3/files"),
+     frozenset({"name", "mimeType", "parents"})),
+    ("POST", DOCS_HOST, re.compile(rf"/v1/documents/{_OBJ}:batchUpdate"),
+     frozenset({"requests"})),
+)
+_QUERY_KEYS = frozenset({"q", "fields", "pageSize", "sendUpdates"})
+
+
+def _check_call(method: str, host: str, path: str, query, body) -> None:
+    """Refuse anything outside `_ALLOWED`. Runs BEFORE the token is read, so a
+    request that is not on the list never even loads a credential."""
+    keys = None
+    for m, h, pattern, body_keys in _ALLOWED:
+        if m == method and h == host and pattern.fullmatch(path):
+            keys = body_keys
+            break
+    if keys is None:
+        raise GoogleActionError("not_permitted")
+    if body is not None:
+        if not isinstance(body, dict) or not set(body) <= keys:
+            raise GoogleActionError("not_permitted")
+    elif method in ("POST", "PATCH"):
+        raise GoogleActionError("not_permitted")
+    if query is not None and (not isinstance(query, dict) or not set(query) <= _QUERY_KEYS):
+        raise GoogleActionError("not_permitted")
+    if "/events" in path and method in ("POST", "PATCH"):
+        # Calendar writes never notify a third party.
+        if (query or {}).get("sendUpdates") != "none":
+            raise GoogleActionError("not_permitted")
+    elif query and "sendUpdates" in query:
+        raise GoogleActionError("not_permitted")
+    if path.endswith(":batchUpdate"):
+        reqs = (body or {}).get("requests")
+        if (not isinstance(reqs, list) or not 1 <= len(reqs) <= 2
+                or not all(isinstance(r, dict) and set(r) == {"insertText"}
+                           and isinstance(r["insertText"], dict)
+                           and set(r["insertText"]) <= {"location", "endOfSegmentLocation", "text"}
+                           for r in reqs)):
+            raise GoogleActionError("not_permitted")
+    if host == TASKS_HOST and body and "status" in body and body["status"] != "completed":
+        raise GoogleActionError("not_permitted")
+    if "/drive/v3/files" == path and method == "POST":
+        if (body or {}).get("mimeType") not in (FOLDER_MIME, DOC_MIME):
+            raise GoogleActionError("not_permitted")
+
+
 def _request(method: str, host: str, path: str, *, query: dict | None = None,
-            body: dict | None = None, _retry: bool = True):
-    """The ONE function that reaches the Google write APIs. `host` and `path`
-    must already be one of the closed set a caller below builds; nothing here
-    accepts a path built from untrusted text."""
+             body: dict | None = None, _retry: bool = True):
+    """The ONE function that reaches the Google write APIs. The call must be
+    on `_ALLOWED`; nothing here accepts a path built from untrusted text."""
+    _check_call(method, host, path, query, body)
     token_path, data = _read_token_data()
     full = f"https://{host}{path}"
     if query:
@@ -565,7 +826,9 @@ def _request(method: str, host: str, path: str, *, query: dict | None = None,
     except urllib.error.HTTPError as e:
         if 300 <= e.code <= 399:
             raise GoogleActionError("redirect") from None
-        if e.code in (401, 403) and _retry:
+        if e.code == 401 and _retry:
+            # An expired access token: the request was refused, not run, so
+            # repeating it after a renewal cannot do anything twice.
             refreshed = _refresh_access_token(data)
             _write_token_data(token_path, refreshed)
             return _request(method, host, path, query=query, body=body, _retry=False)
@@ -582,12 +845,35 @@ def _request(method: str, host: str, path: str, *, query: dict | None = None,
 
 # --- the closed set of calls, one per kind ----------------------------------
 
+def _plus_minutes(start: str, minutes) -> str:
+    """`start` (a date-time with an offset) plus a duration, same offset."""
+    return (datetime.fromisoformat(start) + timedelta(minutes=int(minutes))
+            ).isoformat(timespec="seconds")
+
+
+def _time_field(value: str) -> dict:
+    return {"dateTime": value} if "T" in value else {"date": value}
+
+
+def _task_due(value: str) -> str:
+    """Tasks keeps only the DATE of `due`, and wants an RFC 3339 timestamp."""
+    return value[:10] + "T00:00:00.000Z"
+
+
+def _quoted(value: str) -> str:
+    return urllib.parse.quote(value, safe="@.")
+
+
 def _calendar_create(f: dict) -> dict:
-    cal = urllib.parse.quote(f.get("calendar_id", "primary"), safe="@.")
+    cal = _quoted(f.get("calendar_id", "primary"))
     start = f["start"]
-    end = f.get("end") or _plus_minutes(start, f.get("duration_minutes", 60))
-    body = {"summary": f["title"],
-           "start": _time_field(start), "end": _time_field(end)}
+    if f.get("end"):
+        end = f["end"]
+    elif len(start) == 10:
+        end = (_day_of(start) + timedelta(days=1)).isoformat()
+    else:
+        end = _plus_minutes(start, f["duration_minutes"])
+    body = {"summary": f["title"], "start": _time_field(start), "end": _time_field(end)}
     if "location" in f:
         body["location"] = f["location"]
     if "description" in f:
@@ -597,8 +883,8 @@ def _calendar_create(f: dict) -> dict:
 
 
 def _calendar_update(f: dict) -> dict:
-    cal = urllib.parse.quote(f.get("calendar_id", "primary"), safe="@.")
-    event = urllib.parse.quote(f["event_id"], safe="")
+    cal = _quoted(f.get("calendar_id", "primary"))
+    event = _quoted(f["event_id"])
     body: dict = {}
     if "title" in f:
         body["summary"] = f["title"]
@@ -614,108 +900,96 @@ def _calendar_update(f: dict) -> dict:
                     query={"sendUpdates": "none"}, body=body)
 
 
-def _time_field(value: str) -> dict:
-    return {"dateTime": value} if "T" in value else {"date": value}
-
-
-def _plus_minutes(start: str, minutes) -> str:
-    minutes = int(minutes) if minutes else 60
-    probe = start if "T" in start else start + "T00:00:00"
-    base = probe[:19]
-    when = datetime.strptime(base, "%Y-%m-%dT%H:%M:%S")
-    out = (when + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%S")
-    suffix = start[19:] if "T" in start else ""
-    return out + suffix if "T" in start else out.split("T")[0]
-
-
 def _task_create(f: dict) -> dict:
-    tl = urllib.parse.quote(f.get("task_list", "@default"), safe="@")
+    tl = _quoted(f.get("task_list", "@default"))
     body = {"title": f["title"]}
     if "notes" in f:
         body["notes"] = f["notes"]
     if "due" in f:
-        body["due"] = f["due"]
+        body["due"] = _task_due(f["due"])
     return _request("POST", TASKS_HOST, f"/tasks/v1/lists/{tl}/tasks", body=body)
 
 
 def _task_update(f: dict) -> dict:
-    tl = urllib.parse.quote(f.get("task_list", "@default"), safe="@")
-    task = urllib.parse.quote(f["task_id"], safe="")
+    tl = _quoted(f.get("task_list", "@default"))
+    task = _quoted(f["task_id"])
     body: dict = {}
     if "title" in f:
         body["title"] = f["title"]
     if "notes" in f:
         body["notes"] = f["notes"]
     if "due" in f:
-        body["due"] = f["due"]
+        body["due"] = _task_due(f["due"])
     return _request("PATCH", TASKS_HOST, f"/tasks/v1/lists/{tl}/tasks/{task}", body=body)
 
 
 def _task_complete(f: dict) -> dict:
-    tl = urllib.parse.quote(f.get("task_list", "@default"), safe="@")
-    task = urllib.parse.quote(f["task_id"], safe="")
+    tl = _quoted(f.get("task_list", "@default"))
+    task = _quoted(f["task_id"])
     return _request("PATCH", TASKS_HOST, f"/tasks/v1/lists/{tl}/tasks/{task}",
                     body={"status": "completed"})
 
 
-def _notes_folder_id() -> str:
-    """The id of "JARVIS Notas", creating it if this is the first note. Only
-    ever searches/creates by this fixed, code-chosen name — never a name a
-    caller supplies."""
-    q = (f"name = '{NOTES_FOLDER_NAME}' and mimeType = "
-        "'application/vnd.google-apps.folder' and trashed = false")
-    found = _request("GET", CALENDAR_HOST, "/drive/v3/files",
-                     query={"q": q, "fields": "files(id,name)", "pageSize": "1"})
-    files = found.get("files", []) if isinstance(found, dict) else []
+def _google_id(value) -> str:
+    """An id Google sent back, checked before it goes into a path or a body."""
+    if not isinstance(value, str) or not _ID_RE.fullmatch(value):
+        raise GoogleActionError("unexpected")
+    return value
+
+
+def _notes_folder_id(create: bool) -> Optional[str]:
+    """The id of "JARVIS Notas". Searched by this module's fixed name only;
+    created when `create` is true and it is not there yet. Under `drive.file`
+    the search can only ever see folders JARVIS itself created."""
+    q = (f"name = '{NOTES_FOLDER_NAME}' and mimeType = '{FOLDER_MIME}' "
+         "and trashed = false")
+    found = _request("GET", DRIVE_HOST, "/drive/v3/files",
+                     query={"q": q, "fields": "files(id)", "pageSize": "1"})
+    files = found.get("files") if isinstance(found, dict) else None
     if files:
-        return files[0]["id"]
-    created = _request("POST", CALENDAR_HOST, "/drive/v3/files",
-                       body={"name": NOTES_FOLDER_NAME,
-                            "mimeType": "application/vnd.google-apps.folder"})
-    return created["id"]
+        return _google_id(files[0].get("id"))
+    if not create:
+        return None
+    made = _request("POST", DRIVE_HOST, "/drive/v3/files",
+                    body={"name": NOTES_FOLDER_NAME, "mimeType": FOLDER_MIME})
+    return _google_id(made.get("id") if isinstance(made, dict) else None)
 
 
 def _note_create(f: dict) -> dict:
-    folder = _notes_folder_id()
-    doc = _request("POST", DOCS_HOST, "/v1/documents", body={"title": f["title"]})
-    doc_id = doc["documentId"]
-    _request("PATCH", CALENDAR_HOST, f"/drive/v3/files/{doc_id}",
-             query={"addParents": folder, "removeParents": "root", "fields": "id,parents"})
-    body = f.get("body")
-    if body:
+    folder = _notes_folder_id(create=True)
+    doc = _request("POST", DRIVE_HOST, "/drive/v3/files",
+                   body={"name": f["title"], "mimeType": DOC_MIME, "parents": [folder]})
+    doc_id = _google_id(doc.get("id") if isinstance(doc, dict) else None)
+    if "body" in f:
         _request("POST", DOCS_HOST, f"/v1/documents/{doc_id}:batchUpdate",
-                 body={"requests": [{"insertText": {"location": {"index": 1}, "text": body}}]})
-    return {"documentId": doc_id}
+                 body={"requests": [{"insertText": {"location": {"index": 1},
+                                                    "text": f["body"]}}]})
+    return {"id": doc_id}
 
 
-def _own_note_or_refuse(doc_id: str) -> int:
-    """The doc's current end index, and proof it lives in "JARVIS Notas" (the
-    only folder JARVIS ever files a note under): refuses otherwise, even
-    though `drive.file` already limits visibility to files this app created."""
-    folder = _notes_folder_id()
-    meta = _request("GET", CALENDAR_HOST, f"/drive/v3/files/{doc_id}",
-                    query={"fields": "id,parents,mimeType"})
-    if (meta.get("mimeType") != "application/vnd.google-apps.document"
-            or folder not in (meta.get("parents") or [])):
+def _require_own_note(doc_id: str) -> None:
+    """Proof that `doc_id` is a live Google Doc filed inside "JARVIS Notas",
+    the only folder JARVIS files a note under. `drive.file` already limits
+    what is visible to files this app created; this refuses the rest anyway."""
+    folder = _notes_folder_id(create=False)
+    if folder is None:
         raise GoogleActionError("not_our_note")
-    doc = _request("GET", DOCS_HOST, f"/v1/documents/{doc_id}")
-    body = doc.get("body", {}) if isinstance(doc, dict) else {}
-    content = body.get("content", []) if isinstance(body, dict) else []
-    end = 1
-    for el in content:
-        if isinstance(el, dict) and "endIndex" in el:
-            end = max(end, el["endIndex"])
-    return end
+    meta = _request("GET", DRIVE_HOST, f"/drive/v3/files/{doc_id}",
+                    query={"fields": "id,parents,mimeType,trashed"})
+    parents = meta.get("parents") if isinstance(meta, dict) else None
+    if (not isinstance(meta, dict)
+            or meta.get("mimeType") != DOC_MIME or meta.get("trashed") is True
+            or not isinstance(parents, list) or folder not in parents):
+        raise GoogleActionError("not_our_note")
 
 
 def _note_append(f: dict) -> dict:
     doc_id = f["doc_id"]
-    end = _own_note_or_refuse(doc_id)
-    index = max(1, end - 1)
+    _require_own_note(doc_id)
     _request("POST", DOCS_HOST, f"/v1/documents/{doc_id}:batchUpdate",
-             body={"requests": [{"insertText": {"location": {"index": index},
-                                               "text": "\n" + f["text"]}}]})
-    return {"documentId": doc_id}
+             body={"requests": [{"insertText": {"endOfSegmentLocation": {},
+                                                "text": "\n" + f["text"]}}]})
+    return {"id": doc_id}
 
 
 _CALLS = {
@@ -732,7 +1006,7 @@ _CALLS = {
 @dataclass
 class Outcome:
     ok: bool
-    code: str
+    code: str            # "ok" | "dryrun" | "http_<n>" | "redirect" | "unreachable" | "reauth" | ...
     result_id: str = ""
 
 
@@ -748,17 +1022,20 @@ def confirm_strict() -> bool:
 
 def perform(action: Action) -> Outcome:
     """Do it (or, in dry-run, do nothing). Never raises, never returns a body."""
-    if action.kind not in _CALLS:
+    call = _CALLS.get(action.kind)
+    if call is None:
         return Outcome(False, "not_permitted")
     if dryrun():
         return Outcome(True, "dryrun")
     try:
-        result = _CALLS[action.kind](dict(action.fields))
+        result = call(dict(action.fields))
     except GoogleActionError as e:
         return Outcome(False, str(e)[:120])
+    except (KeyError, TypeError, ValueError, AttributeError, IndexError):
+        return Outcome(False, "unexpected")
     rid = ""
     if isinstance(result, dict):
-        rid = str(result.get("id") or result.get("documentId") or "")[:80]
+        rid = str(result.get("id") or "")[:80]
     return Outcome(True, "ok", rid)
 
 
@@ -774,6 +1051,7 @@ def _audit_path():
 
 
 def audit_ready() -> bool:
+    """Can a line be appended? Checked BEFORE acting: no log, no action."""
     try:
         _append_line("")
         return True
@@ -814,7 +1092,7 @@ def audit(action: Optional[Action], *, confirmed_by: str, result: str,
     try:
         _append_line(json.dumps(entry, ensure_ascii=True, separators=(",", ":")))
     except OSError:
-        pass
+        pass          # the caller checked audit_ready() before acting
 
 
 def _plain_fields(fields: dict) -> dict:
