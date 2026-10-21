@@ -24,6 +24,15 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setenv("JARVIS_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("JARVIS_PORT", "8340")
     monkeypatch.setenv("JARVIS_ENV_FILE", str(tmp_path / ".env"))
+    # `_write_env_key` sets `os.environ[key] = value` directly, as the real
+    # server does on a live save — it is not a `monkeypatch.setenv` call, so
+    # monkeypatch would not otherwise know to undo it. Seeding both keys
+    # through monkeypatch FIRST makes it track them anyway: on teardown it
+    # restores whatever `HONORIFIC`/`USER_NAME` were before this test, no
+    # matter how they changed meanwhile, so one test saving "name" cannot
+    # leak into the next test file that assumes the default.
+    monkeypatch.setenv("HONORIFIC", "sir")
+    monkeypatch.setenv("USER_NAME", "")
     import data_paths
     importlib.reload(data_paths)
     import run_store
