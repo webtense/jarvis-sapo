@@ -92,6 +92,24 @@ def connections_path() -> Path:
     return brain_home() / _CONNECTIONS_NAME
 
 
+def home_actions_path() -> Path:
+    """The user's allow-list of home actions (see `home_actions.py`).
+
+    A file the USER writes, beside connections.json: JARVIS never creates or
+    edits it, and with no file there are no actions."""
+    return brain_home() / "home-actions.json"
+
+
+def home_actions_log_path() -> Path:
+    """Append-only JSONL audit of every home action asked for."""
+    return brain_home() / "home-actions.log"
+
+
+def home_alerts_path() -> Path:
+    """The user's spoken-alert rules (see `ha_watch.py`). Also his own file."""
+    return brain_home() / "home-alerts.json"
+
+
 def connections_seed_path() -> Path:
     """What JARVIS last wrote into `connections_path`, as a hash. See
     `persona_seed_path` — same record, same reasons."""

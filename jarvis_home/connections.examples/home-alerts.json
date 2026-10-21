@@ -1,0 +1,16 @@
+{
+  "//": "EJEMPLO NO ACTIVO (enabled: false). Para usarlo, copia este fichero a data/jarvis/home-alerts.json y pon enabled a true. JARVIS consulta Home Assistant en solo lectura (HA_URL y HA_TOKEN_FILE en el entorno del servidor JARVIS, el mismo token de lectura) y avisa por voz solo cuando algo CAMBIA, sin repetir. Solo la alarma disparada es urgente. Los nombres son los que dira JARVIS (no se usan los de Home Assistant). Ver docs/casa-control.md.",
+  "enabled": false,
+  "interval_s": 30,
+  "max_per_hour": 6,
+  "alarm_max_per_hour": 10,
+  "rules": [
+    {"id": "alarma", "type": "alarm_triggered", "entity": "alarm_control_panel.casa"},
+    {"id": "llega_ana", "type": "person", "entity": "person.ana", "name": "Ana",
+     "events": ["arrive", "leave"], "debounce_s": 90, "min_interval_s": 600},
+    {"id": "puerta_garaje", "type": "open_too_long", "entity": "binary_sensor.puerta_garaje",
+     "name": "la puerta del garaje", "minutes": 10},
+    {"id": "consumo", "type": "power_above", "entity": "sensor.potencia_casa",
+     "name": "la casa", "above_w": 5000, "min_interval_s": 1800}
+  ]
+}

@@ -519,6 +519,18 @@ EXEMPT = {
         "response envelope, never rendered into prose"),
     "ha_readonly_mcp.main": (
         "the same JSON-RPC envelope id, echoed on the internal-error path"),
+    "ha_watch.fetch_readings": (
+        "the spoken-alerts watcher reads Home Assistant entity states, not a "
+        "session or a run. Only `state`, a timestamp and a unit are kept (cut "
+        "to 60 and 12 characters), nothing is printed or spoken from them: "
+        "they are compared with fixed words (`home`, `triggered`, `on`) and "
+        "numbers; the sentences use names from the user's own file. "
+        "tests/test_ha_watch.py drives it"),
+    "ha_watch.parse_config": (
+        "`rid` and the rule fields come from the user's own home-alerts.json, "
+        "not from a session. They are validated against fixed patterns, and "
+        "an error message names the rule id only after it matched `[a-z0-9_]`; "
+        "tests/test_ha_watch.py drives it"),
     "jarvis_bridge_mcp.handle": (
         "`id` is a JSON-RPC message id off the stdio channel between this "
         "process and the CLI, echoed back in the response envelope and never "

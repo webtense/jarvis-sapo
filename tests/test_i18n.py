@@ -695,7 +695,11 @@ def test_the_persona_in_castilian_names_the_same_tools_and_rules():
     # The one phrase the user SAYS is translated, on purpose (the server
     # recognises both: `FRESH_START_PHRASES_ES`).
     assert code(en) - code(es_text) == {"start fresh"}
-    assert code(es_text) - code(en) == set()
+    # Added on purpose, only in Spanish: the home-control tool and the field it
+    # takes. The English persona is pinned by hash (data_paths.KNOWN_TEMPLATE_HASHES)
+    # and this fork does not touch it; the control is off unless the user
+    # writes a whitelist, and the tool is hidden from the brain until then.
+    assert code(es_text) - code(en) == {"home_propose", "entity_id"}
     for spoken in ("empezar de cero",):
         assert spoken in es_text
     for loan in ("frontend", "transcript", "tests frente", "prompt "):

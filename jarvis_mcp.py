@@ -696,6 +696,31 @@ TOOL_SPECS = [
             "required": ["text"],
         },
     },
+    {
+        "name": "home_propose",
+        "description": (
+            "Propose ONE action on the user's home from HIS allow-list (light, "
+            "switch, scene, thermostat, media player, blind). NOTHING happens: "
+            "JARVIS asks him aloud, word for word, and acts only if he says yes. "
+            "Alarms, locks and cameras are never touched. Use it only if he asked "
+            "for it this very turn, with the exact entity_id. Then say nothing "
+            "more and end your turn; never claim it was done."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entity_id": {"type": "string", "description": "e.g. light.salon"},
+                "service": {"type": "string",
+                            "description": ("turn_on, turn_off, toggle, set_temperature, "
+                                            "media_play, media_pause, volume_set, "
+                                            "volume_up, volume_down, open_cover, "
+                                            "close_cover, stop_cover")},
+                "temperature": {"type": "number", "description": "set_temperature, degrees"},
+                "brightness_pct": {"type": "integer", "description": "light turn_on, 1-100"},
+                "volume_level": {"type": "number", "description": "volume_set, 0-1"},
+            },
+            "required": ["entity_id", "service"],
+        },
+    },
 ]
 
 
@@ -819,6 +844,23 @@ def _error(rid, code: int, message: str) -> dict:
     return {"jsonrpc": "2.0", "id": rid, "error": {"code": code, "message": message}}
 
 
+def _visible_specs() -> list[dict]:
+    """The tools described to the brain on every turn (about 250 tokens each).
+
+    `home_propose` is listed only once the user has written his own
+    home-actions.json: without it the tool could only ever say "off", and
+    describing it would cost every turn of every user that never asked for
+    home control. Calling it by name still works and still answers "off"."""
+    try:
+        import data_paths
+        configured = data_paths.home_actions_path().is_file()
+    except Exception:
+        configured = False
+    if configured:
+        return TOOL_SPECS
+    return [t for t in TOOL_SPECS if t["name"] != "home_propose"]
+
+
 def handle(msg: dict) -> dict | None:
     """One JSON-RPC message in, at most one reply out.
 
@@ -839,7 +881,7 @@ def handle(msg: dict) -> dict | None:
     elif method == "ping":
         reply = {"jsonrpc": "2.0", "id": rid, "result": {}}
     elif method == "tools/list":
-        reply = {"jsonrpc": "2.0", "id": rid, "result": {"tools": TOOL_SPECS}}
+        reply = {"jsonrpc": "2.0", "id": rid, "result": {"tools": _visible_specs()}}
     elif method == "tools/call":
         params = msg.get("params") or {}
         name = params.get("name", "")
