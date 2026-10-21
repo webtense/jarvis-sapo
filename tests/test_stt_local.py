@@ -812,13 +812,12 @@ async def test_the_words_are_logged_only_when_debugging_is_asked_for(caplog, mon
 @pytest.mark.asyncio
 async def test_a_phrase_without_the_wake_word_is_reported_as_such(caplog, monkeypatch):
     import logging
-    monkeypatch.setenv("JARVIS_STT", "local")
-    monkeypatch.setenv("JARVIS_WAKE_WORD", "whisper")
-
     async def nothing(_): pass
 
+    # The gate is asked for explicitly: whether it is on by default depends on
+    # faster-whisper being importable, which the CI runner does not have.
     session = MicSession(emit=nothing, on_text=nothing, stt=FakeTranscriber("enciende la luz"),
-                         use_wake_word=False)
+                         use_wake_word=False, wake_text_gate=True, window_sec=20)
     with caplog.at_level(logging.INFO):
         await session.feed(_phrase_audio())
     assert any("no wake word" in r.getMessage() for r in caplog.records)
