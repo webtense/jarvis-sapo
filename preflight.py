@@ -524,7 +524,14 @@ def _check_local_stt_sync() -> Check:
                      message="Speech recognition: the browser's (JARVIS_STT=browser).")
     gaps = stt_local.problems()
     if not gaps:
-        wake = " with the wake word" if stt_local.wake_enabled() else ""
+        extras = []
+        if stt_local.wake_enabled():
+            extras.append("the wake word")
+        elif stt_local.wake_text_enabled():
+            extras.append(f"the 'Jarvis' text wake word, {stt_local.wake_window_sec():g} s window")
+        if stt_local.barge_in_requested():
+            extras.append("voice barge-in")
+        wake = " with " + " and ".join(extras) if extras else ""
         return Check(name="local_stt", status=STATUS_OK,
                      message=f"Local speech recognition ready ({stt_local.model_name()}{wake}).")
     using = ("the browser's recogniser is in use instead"
