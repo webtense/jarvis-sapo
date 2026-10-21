@@ -16,6 +16,7 @@ from enum import IntEnum
 from typing import Awaitable, Callable, Optional
 
 import i18n
+import lang
 
 log = logging.getLogger("jarvis.speech")
 
@@ -136,6 +137,11 @@ class Priority(IntEnum):
 
 BRIDGES = ("As I was saying —", "Back to it —", "Where was I —")
 CANCEL_WORDS = ("wait", "no", "stop", "cancel", "hold on")
+# What a Spanish speaker says to cut JARVIS off. Added to the English set, not
+# in place of it (a Spanish user still says "stop" now and then), and only when
+# JARVIS_LANGUAGE=es so the original behaviour is untouched.
+CANCEL_WORDS_ES = ("espera", "para", "para ya", "basta", "cancela", "detente",
+                   "alto", "un momento", "un segundo")
 UNREAD_PREFIX = "Before I forget —"
 # The last resort, and only that. An unacked chunk's tokens count as echo
 # because the chunk may still be coming out of the speaker — and nothing plays
@@ -287,13 +293,29 @@ _REPLAY_TRIGGERS = frozenset({
 })
 
 
+# "Say that again", in Spanish. Same rule as above: only a bare request to
+# repeat; anything that asks a real question ("¿qué quieres decir con eso?")
+# goes to the brain. "Por favor", "perdón" and the like are filler.
+_REPLAY_FILLER_ES = frozenset({"perdona", "perdón", "perdone", "jarvis", "por", "favor",
+                               "señor", "eh", "um", "oye"})
+_REPLAY_TRIGGERS_ES = frozenset({
+    ("repite",), ("repite", "eso"), ("repítelo",), ("repíteme",), ("repita",),
+    ("repita", "eso"), ("dilo", "otra", "vez"), ("dilo", "de", "nuevo"),
+    ("otra", "vez"), ("de", "nuevo"), ("qué", "has", "dicho"), ("qué", "dijiste"),
+    ("qué", "ha", "sido", "eso"), ("cómo", "dices"),
+})
+
+
 def _is_replay_request(toks: list[str]) -> bool:
+    spanish = lang.language() == "es"
+    filler = _REPLAY_FILLER | _REPLAY_FILLER_ES if spanish else _REPLAY_FILLER
+    triggers = _REPLAY_TRIGGERS | _REPLAY_TRIGGERS_ES if spanish else _REPLAY_TRIGGERS
     i, j = 0, len(toks)
-    while i < j and toks[i] in _REPLAY_FILLER:
+    while i < j and toks[i] in filler:
         i += 1
-    while j > i and toks[j - 1] in _REPLAY_FILLER:
+    while j > i and toks[j - 1] in filler:
         j -= 1
-    return tuple(toks[i:j]) in _REPLAY_TRIGGERS
+    return tuple(toks[i:j]) in triggers
 
 
 @dataclass
@@ -407,6 +429,8 @@ class SpeechScheduler:
         self.echo_window = echo_window
         self.bridges = bridges
         self.cancel_words = tuple(cancel_words)
+        if cancel_words is CANCEL_WORDS and lang.language() == "es":
+            self.cancel_words += CANCEL_WORDS_ES
         self._next_id = 1
         self._current: Optional[Utterance] = None
         self._paused: Optional[Utterance] = None
