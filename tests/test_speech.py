@@ -296,6 +296,26 @@ async def test_echo_classification(h):
 
 
 @pytest.mark.asyncio
+async def test_echo_classification_with_the_name_honorific(h, monkeypatch):
+    """`i18n.t()` is what applies HONORIFIC, and it runs BEFORE the scheduler
+    ever sees the text (every call site is `speech.say(i18n.t(...))`) — so
+    with HONORIFIC=name the scheduler records "Andrés", not "señor" or "sir",
+    and the echo filter must recognise the user's own microphone hearing that
+    exact name back."""
+    monkeypatch.setenv("JARVIS_LANGUAGE", "es")
+    monkeypatch.setenv("HONORIFIC", "name")
+    monkeypatch.setenv("USER_NAME", "Andrés")
+    import i18n
+    s = h.sched
+    said = i18n.t("Cancelled, sir.")
+    assert said == "Cancelado, Andrés."
+    await s.say(said)
+    await asyncio.sleep(0.1)
+    assert s.classify("cancelado andrés") == "echo"
+    assert s.classify("yes please do that now") == "speech"
+
+
+@pytest.mark.asyncio
 async def test_cancel_word_only_inside_cancel_window(h):
     s = h.sched
     assert s.classify("wait") == "speech"

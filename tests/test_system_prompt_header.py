@@ -158,12 +158,17 @@ def _with_hostile_user_name(brain_module, b):
     b.config.user_name = HOSTILE
 
 
+def _with_hostile_honorific(brain_module, b):
+    b.config.honorific = HOSTILE
+
+
 HOSTILE_INPUTS = {
     "active_projects": _with_hostile_projects,
     "_handover": _with_hostile_handover,
     "_boot_handover": _with_hostile_journal,
     "_handover_untrusted": _with_hostile_taint_label,
     "user_name": _with_hostile_user_name,
+    "honorific": _with_hostile_honorific,
 }
 
 
@@ -195,15 +200,43 @@ def test_the_hostile_input_list_covers_every_input_the_prompt_reads():
                 and isinstance(sub.func.value, ast.Name) \
                 and sub.func.value.id == "self":
             read.add(sub.func.attr)
-    # This process's own values: an integer counter, the two private helpers
+    # This process's own values: an integer counter, the private helpers
     # whose RESULTS are what `HOSTILE_INPUTS` poisons, and `self.config`
     # itself — the walk above already reduces `self.config.<x>` to `<x>`, so
     # the dataclass's own fields are enumerated one by one.
-    ours = {"generation", "_boot_projects", "config"}
+    # `_treatment_clause` reads `self.config.honorific` and
+    # `self.config.user_name` itself (the latter already driven, through
+    # `plain_phrase`, by `user_name` above); its own exhaustiveness is held
+    # by `test_the_treatment_clause_is_driven_for_every_input` below.
+    ours = {"generation", "_boot_projects", "_treatment_clause", "config"}
     undecided = sorted(read - set(HOSTILE_INPUTS) - ours)
     assert not undecided, (
         f"launch_prompt reads these and no hostile value is driven through "
         f"them: {undecided}")
+
+
+def test_the_treatment_clause_is_driven_for_every_input():
+    """The same exhaustiveness check, scoped to `_treatment_clause` — the one
+    helper `launch_prompt` calls that is exempted above because its own
+    inputs (`honorific`, `user_name`) are driven by `HOSTILE_INPUTS`
+    directly, not by walking `launch_prompt`'s source."""
+    import brain as brain_module
+    src = Path(brain_module.__file__).read_text()
+    tree = ast.parse(src)
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef) and n.name == "_treatment_clause")
+    read = set()
+    for sub in ast.walk(fn):
+        if isinstance(sub, ast.Attribute) and isinstance(sub.ctx, ast.Load):
+            if isinstance(sub.value, ast.Name) and sub.value.id == "self":
+                read.add(sub.attr)
+            elif (isinstance(sub.value, ast.Attribute)
+                  and sub.value.attr == "config"):
+                read.add(sub.attr)
+    undecided = sorted(read - set(HOSTILE_INPUTS) - {"config"})
+    assert not undecided, (
+        f"_treatment_clause reads these and no hostile value is driven "
+        f"through them: {undecided}")
 
 
 def test_a_project_name_that_is_not_an_ordinary_name_is_dropped_not_reworded(

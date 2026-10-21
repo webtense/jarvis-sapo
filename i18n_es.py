@@ -573,4 +573,5 @@ PAIRS: list[tuple[str, str]] = [
      "Un ajuste no puede empezar ni acabar con un espacio o unas comillas"),
     ("{key} is not a setting JARVIS will write",
      "{key} no es un ajuste que JARVIS vaya a escribir"),
+    ("That is not a valid honorific", "Ese tratamiento no es válido"),
 ]

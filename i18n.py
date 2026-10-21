@@ -137,33 +137,68 @@ def _translate(text: str, depth: int) -> str:
 # The form of address ("señor" / "señora" / none)
 # ---------------------------------------------------------------------------
 #
-# The Settings panel stores `HONORIFIC` as `sir` (the default), `ma'am` or
-# `none`. The catalogue is written with "señor"; the preference is applied to
-# the SPANISH TEMPLATE, before any captured text is spliced in, so a project
-# or a file that happens to be called "señor" is never rewritten. English is
-# never touched: with `JARVIS_LANGUAGE=en` this code does not run at all.
+# The Settings panel stores `HONORIFIC` as `sir` (the default), `ma'am`,
+# `none` or `name`. The catalogue is written with "señor"; the preference is
+# applied to the SPANISH TEMPLATE, before any captured text is spliced in, so
+# a project or a file that happens to be called "señor" is never rewritten.
+# English is never touched: with `JARVIS_LANGUAGE=en` this code does not run
+# at all.
+#
+# `name` replaces "señor" with the user's own name (`USER_NAME`), read and
+# sanitised here — the same shape of check `brain.plain_phrase` applies to the
+# same value before it reaches the brain's system prompt, kept local rather
+# than imported so this module stays free of a dependency on `brain.py` for
+# three lines of regex. `USER_NAME` is configuration, not something a turn's
+# own untrusted content could rewrite, but it is still somebody's typed text
+# and gets no special treatment for being short: a blank or unusable name
+# makes `name` behave exactly like `none`.
 
 _SENOR = re.compile(r"\bseñor\b")
+_SENOR_CI = re.compile(r"\bseñor\b", re.IGNORECASE)
 _COMMA_SENOR = re.compile(r",\s*señor\b")
 _MADAM = frozenset({"ma'am", "ma’am", "maam", "madam", "señora", "senora", "female"})
 _NONE = frozenset({"none", "ninguno", "ninguna", "no", "off"})
+_NAME_MODE = frozenset({"name", "nombre"})
+
+# A name is a short, ordinary phrase: letters (with accents), spaces, and a
+# handful of punctuation marks a real name can contain ("O'Brien", "Jean-Luc").
+# No control character, no line break, nothing `str.splitlines()` would split
+# on — the same shape `brain._PLAIN_PHRASE_RE` holds `USER_NAME` to before it
+# reaches the brain's own system prompt.
+_NAME_RE = re.compile(r"\w([\w ,.\-/+']{0,62}\w)?")
 
 
 def honorific() -> str:
-    """`sir`, `madam` or `none`, read from `HONORIFIC` each time (the settings
-    endpoint updates the environment live). Anything unrecognised is `sir`."""
+    """`sir`, `madam`, `none` or `name`, read from `HONORIFIC` each time (the
+    settings endpoint updates the environment live). Anything unrecognised is
+    `sir`."""
     raw = os.environ.get("HONORIFIC", "sir").strip().lower()
     if raw in _MADAM:
         return "madam"
     if raw in _NONE:
         return "none"
+    if raw in _NAME_MODE:
+        return "name"
     return "sir"
 
 
+def _clean_user_name() -> str:
+    """`USER_NAME`, sanitised: an ordinary short phrase, or "" for anything
+    else (empty, a line break, a control character, too long). "" is not a
+    placeholder here — the caller treats it exactly as having no name at
+    all, never as a literal empty word spliced into a sentence."""
+    raw = os.environ.get("USER_NAME", "").strip()
+    if not raw:
+        return ""
+    m = _NAME_RE.fullmatch(raw)
+    return m.group(0) if m else ""
+
+
 def _honorific_es(spanish: str) -> str:
-    """The Spanish template with "señor" turned into "señora", or dropped
-    together with the comma that introduces it ("Hecho, señor: listo" ->
-    "Hecho: listo"), according to the preference."""
+    """The Spanish template with "señor" turned into "señora", replaced by
+    the user's own name, or dropped together with the comma that introduces
+    it ("Hecho, señor: listo" -> "Hecho: listo"), according to the
+    preference."""
     if "señor" not in spanish:
         return spanish
     mode = honorific()
@@ -171,6 +206,11 @@ def _honorific_es(spanish: str) -> str:
         return spanish
     if mode == "madam":
         return _SENOR.sub("señora", spanish)
+    if mode == "name":
+        name = _clean_user_name()
+        if name:
+            return _SENOR_CI.sub(name, spanish)
+        mode = "none"
     return re.sub(r" {2,}", " ", _SENOR.sub("", _COMMA_SENOR.sub("", spanish)))
 
 
