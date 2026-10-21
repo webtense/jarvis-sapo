@@ -8137,6 +8137,15 @@ async def api_admin_home():
     return await asyncio.to_thread(admin_panel.home_report)
 
 
+@app.get("/api/admin/google")
+async def api_admin_google():
+    """Google writing, read only: whether it is on, which calendars and lists
+    it may touch, the per-minute limit and the last audit lines. No token, no
+    token path and no account (JARVIS does not store it). The allow-list is
+    NOT editable from here — see docs/admin.md."""
+    return await asyncio.to_thread(admin_panel.google_report, int(GOOGLE_PROPOSAL_TTL))
+
+
 @app.get("/api/admin/system")
 async def api_admin_system():
     uptime = int(time.time() - _session_start)

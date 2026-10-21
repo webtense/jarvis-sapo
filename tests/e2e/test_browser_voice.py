@@ -264,9 +264,9 @@ async def test_a_recogniser_that_dies_at_once_does_not_restart_in_a_loop(start_j
 # --- el botón MUTE de la pantalla principal --------------------------------
 
 async def dismiss_first_run_settings(page) -> None:
-    """Sin clave de voz, la página abre sola el panel de Ajustes (a los ~2 s):
-    es un modal, y tapa el botón igual que taparía cualquier otro. Se cierra
-    como lo haría una persona, con su botón."""
+    """Sin clave de voz, la página abre sola el panel de Ajustes (a los ~2 s).
+    Para los casos con el modal CERRADO se cierra como lo haría una persona,
+    con su botón; el botón MUTE no depende de esto (ver `open_settings`)."""
     try:
         await page.wait_for_selector("#settings-container.open", timeout=8000)
     except Exception:
@@ -274,9 +274,45 @@ async def dismiss_first_run_settings(page) -> None:
     await page.click("#settings-close")
     await page.wait_for_selector("#settings-container", state="hidden", timeout=5000)
 
-async def test_the_mute_button_toggles_and_shows_its_state(start_jarvis):
+
+async def open_settings(page) -> None:
+    """El panel de Ajustes ABIERTO y ya quieto (acabó su transición). Si la
+    página no lo abre sola, se abre como lo haría una persona: menú, Ajustes."""
+    try:
+        await page.wait_for_selector("#settings-container.open", timeout=8000)
+    except Exception:
+        await page.click("#btn-menu")
+        await page.click("#btn-settings")
+        await page.wait_for_selector("#settings-container.open", timeout=5000)
+    # El panel entra deslizándose (0,3 s): se espera a que llegue a su sitio.
+    await page.wait_for_function(
+        "() => document.getElementById('settings-panel-inner')"
+        ".getBoundingClientRect().right <= window.innerWidth + 1",
+        timeout=5000)
+
+
+MUTE_HIT = """
+() => {
+  const b = document.getElementById('mute-toggle').getBoundingClientRect();
+  const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+  return { onTop: !!hit && !!hit.closest('#mute-toggle'),
+           got: hit ? (hit.id || hit.className || hit.tagName) : null };
+}
+"""
+
+
+async def assert_mute_is_on_top(page) -> None:
+    """El centro del botón MUTE devuelve el propio botón: nada lo tapa."""
+    hit = await page.evaluate(MUTE_HIT)
+    assert hit["onTop"], f"algo tapa el botón MUTE: {hit['got']}"
+
+
+@pytest.mark.parametrize("modal", ["open", "closed"])
+async def test_the_mute_button_toggles_and_shows_its_state(start_jarvis, modal):
     """El botón grande existe, es accesible, alterna con el ratón y con la
-    tecla M, y su estado se lee en la etiqueta y en `aria-pressed`."""
+    tecla M, y su estado se lee en la etiqueta y en `aria-pressed`. Se prueba
+    con el modal de Ajustes ABIERTO (el de primer uso se abre solo a los 2 s y
+    antes tapaba el botón) y con el modal cerrado."""
     from playwright.async_api import async_playwright
 
     jarvis = start_jarvis("es", "browser")
@@ -288,7 +324,13 @@ async def test_the_mute_button_toggles_and_shows_its_state(start_jarvis):
             button = page.locator("#mute-toggle")
             # `data-ready` lo pone la página cuando ya atiende el botón.
             await page.wait_for_selector("#mute-toggle[data-ready='1']", timeout=10000)
-            await dismiss_first_run_settings(page)
+            if modal == "open":
+                await open_settings(page)
+                assert await page.locator("#settings-container.open").count() == 1
+            else:
+                await dismiss_first_run_settings(page)
+                assert not await page.locator("#settings-container.open").count()
+            await assert_mute_is_on_top(page)
 
             # Visible y grande, no escondido en el menú ☰.
             assert await button.is_visible()
@@ -301,7 +343,7 @@ async def test_the_mute_button_toggles_and_shows_its_state(start_jarvis):
             assert await button.get_attribute("aria-pressed") == "false"
             assert (await page.text_content("#mute-label")).strip() == "ESCUCHANDO"
 
-            # Con el ratón.
+            # Con el ratón (Playwright comprueba que el clic llega al botón).
             await button.click()
             assert await button.get_attribute("aria-pressed") == "true"
             assert (await page.text_content("#mute-label")).strip() == "MUTE"
@@ -326,8 +368,52 @@ async def test_the_mute_button_toggles_and_shows_its_state(start_jarvis):
 
             # Se llega con el teclado: el foco cae en el botón y Espacio lo activa.
             await button.focus()
+            assert await page.evaluate(
+                "() => document.activeElement.id") == "mute-toggle"
             await page.keyboard.press("Space")
             assert await button.get_attribute("aria-pressed") == "true"
+        finally:
+            await browser.close()
+
+
+async def test_the_mute_button_does_not_cover_the_settings_on_a_narrow_screen(start_jarvis):
+    """A ~375 px el panel ocupa toda la anchura y el botón MUTE queda ENCIMA de
+    él. Ningún control del panel puede quedar debajo: con el panel desplazado
+    hasta el final, ninguno se solapa con el botón."""
+    from playwright.async_api import async_playwright
+
+    jarvis = start_jarvis("es", "browser")
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True, channel="chromium")
+        try:
+            page = await browser.new_page(viewport={"width": 375, "height": 667})
+            await page.goto(jarvis.base + "/")
+            await page.wait_for_selector("#mute-toggle[data-ready='1']", timeout=10000)
+            await open_settings(page)
+            await assert_mute_is_on_top(page)
+
+            overlaps = await page.evaluate("""
+            () => {
+              const panel = document.getElementById('settings-panel-inner');
+              panel.scrollTop = panel.scrollHeight;
+              const m = document.getElementById('mute-toggle').getBoundingClientRect();
+              const bad = [];
+              const sel = 'button, input, select, textarea, a[href], [tabindex]';
+              for (const el of panel.querySelectorAll(sel)) {
+                const r = el.getBoundingClientRect();
+                if (r.width === 0 || r.height === 0) continue;
+                if (getComputedStyle(el).visibility === 'hidden') continue;
+                const hit = !(r.right <= m.left || r.left >= m.right
+                              || r.bottom <= m.top || r.top >= m.bottom);
+                if (hit) bad.push(el.id || el.className || el.tagName);
+              }
+              return bad;
+            }
+            """)
+            assert overlaps == [], f"el botón MUTE tapa controles de Ajustes: {overlaps}"
+            # El botón de cerrar sigue a la vista y sin tapar.
+            close = await page.locator("#settings-close").bounding_box()
+            assert close is not None and close["y"] >= 0
         finally:
             await browser.close()
 

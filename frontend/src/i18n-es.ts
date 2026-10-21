@@ -595,4 +595,13 @@ export const ES: Record<string, string> = {
   "Reject": "Rechazar",
   "Confirmation on the screen": "Confirmación en pantalla",
   "Off: house actions are confirmed aloud only. It is turned on with \"panel_confirm\": true in the allow-list file, by hand.": "Desactivada: las acciones de la casa solo se confirman de viva voz. Se activa a mano con \"panel_confirm\": true en el fichero de la lista blanca.",
+  "Google writing": "Escritura en Google",
+  "Allowed per minute": "Permitidas por minuto",
+  "Calendars it may write to": "Calendarios en los que puede escribir",
+  "Task lists it may write to": "Listas de tareas en las que puede escribir",
+  "The Google allow-list is NOT editable from this screen, for the same reason as the house one. Edit data/jarvis/google-actions.json by hand, with permissions 600, and restart.": "La lista blanca de Google NO se edita desde esta pantalla, por la misma razón que la de la casa. Edite data/jarvis/google-actions.json a mano, con permisos 600, y reinicie.",
+  "A change to your Google account that JARVIS proposed. Nothing happens until you confirm it here or aloud; Reject always works.": "Un cambio en su cuenta de Google que JARVIS propuso. No ocurre nada hasta que lo confirme aquí o de viva voz; Rechazar funciona siempre.",
+  "Confirm by voice. Confirming from this screen is off: it is turned on with \"panel_confirm\": true in the Google allow-list file, by hand. Reject always works.": "Confirma por voz. Confirmar desde esta pantalla está desactivado: se activa a mano con \"panel_confirm\": true en el fichero de la lista blanca de Google. Rechazar funciona siempre.",
+  "{time} left to decide": "quedan {time} para decidir",
+  "The window has run out": "La ventana ha caducado",
 };
