@@ -459,7 +459,7 @@ def test_the_voice_test_is_spoken_in_the_language_of_the_butler(client, piper_vo
     c, _, _ = client
     r = c.post("/api/settings/voice-test", json={"provider": "piper", "voice": "es_MX-claude-high"})
     assert r.json()["provider"] == "piper"
-    assert piper_voices.spoken == ["Probando el audio, señor."]
+    assert "Probando el audio, señor." in piper_voices.spoken      # (el arranque puede decir otras)
 
 
 def test_the_edge_test_labels_mp3_and_a_dead_voice_says_so(client, edge, monkeypatch):
