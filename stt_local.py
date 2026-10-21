@@ -10,6 +10,12 @@ becomes a turn. This module is the opt-in alternative:
   server finds the phrases and transcribes them with faster-whisper.
 * `JARVIS_WAKE_WORD=on` (default off, local only) — a phrase is only taken
   after the openWakeWord model `hey_jarvis` fires.
+* `JARVIS_WAKE_WORD=whisper` (default off) — no extra model: every phrase is
+  transcribed and only taken if it STARTS with "Jarvis" (`wake_text.py`),
+  then a conversation window (`JARVIS_WAKE_WINDOW_SEC`) lets the user go on
+  without repeating it.
+* `JARVIS_BARGE_IN=on` (default off) — sustained voice while JARVIS speaks
+  cuts him off, like the hush key.
 * `JARVIS_STT_MODEL` (default `base`) — the faster-whisper model. Spanish
   never uses a `.en` model: it would transcribe Spanish as bad English.
 
@@ -30,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import logging
+import math
 import os
 import re
 import sys
@@ -39,6 +46,8 @@ from collections import deque
 from enum import Enum
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
+
+import wake_text
 
 log = logging.getLogger("jarvis.stt")
 
@@ -64,6 +73,16 @@ MIN_SPEECH_FRAMES = 4       # a phrase with less voiced audio than this is a cou
 MAX_PHRASE_FRAMES = 190     # ~15 s: a hard stop on one recording
 WAKE_WINDOW_FRAMES = 75     # ~6 s to start speaking after the wake word
 WAKE_THRESHOLD = 0.5        # openWakeWord's own suggested activation score
+
+# Barge-in: the user talks over JARVIS. Deliberately far stricter than the
+# phrase VAD (350 RMS), because while JARVIS speaks the microphone also hears
+# him. Level AND duration AND "well above what his own voice measured".
+BARGE_MIN_RMS = 1200.0      # absolute minimum RMS of a frame that counts
+BARGE_MIN_MS = 400          # that loud, without a break, this long (5 frames)
+BARGE_RATIO = 3.0           # ... and this many times the echo level seen so far
+BARGE_WARMUP_FRAMES = 6     # ~0.5 s: only LEARN the echo level, never trigger
+BARGE_ALPHA = 0.1           # how fast the echo estimate follows quiet frames
+DEFAULT_WAKE_WINDOW_SEC = 20.0
 
 # Energy VAD. RMS of PCM16 (0..32768). The floor tracks the room and the
 # threshold rides above it, with an absolute minimum so digital silence cannot
@@ -96,6 +115,58 @@ def wake_requested() -> bool:
     return os.environ.get("JARVIS_WAKE_WORD", "off").strip().lower() in ("1", "on", "true", "yes")
 
 
+def wake_mode() -> str:
+    """`off`, `openwakeword` (JARVIS_WAKE_WORD=on) or `whisper`."""
+    raw = os.environ.get("JARVIS_WAKE_WORD", "off").strip().lower()
+    if raw == "whisper":
+        return "whisper"
+    return "openwakeword" if raw in ("1", "on", "true", "yes") else "off"
+
+
+def wake_text_enabled() -> bool:
+    """The text wake word needs no package: it applies to every microphone
+    session this server accepts (`local`, and `auto` for the pages that use
+    the local recogniser)."""
+    return wake_mode() == "whisper" and offers_local()
+
+
+def wake_window_sec() -> float:
+    """Seconds after an accepted phrase during which the next one needs no
+    "Jarvis". 0 turns the window off."""
+    try:
+        value = float(os.environ.get("JARVIS_WAKE_WINDOW_SEC", DEFAULT_WAKE_WINDOW_SEC))
+    except ValueError:
+        return DEFAULT_WAKE_WINDOW_SEC
+    if value != value:                                   # NaN
+        return DEFAULT_WAKE_WINDOW_SEC
+    return min(600.0, max(0.0, value))
+
+
+def barge_in_requested() -> bool:
+    return os.environ.get("JARVIS_BARGE_IN", "off").strip().lower() in ("1", "on", "true", "yes")
+
+
+def barge_in_rms() -> float:
+    try:
+        value = float(os.environ.get("JARVIS_BARGE_IN_RMS", BARGE_MIN_RMS))
+    except ValueError:
+        return BARGE_MIN_RMS
+    if value != value:
+        return BARGE_MIN_RMS
+    return min(20000.0, max(2.0 * MIN_SPEECH_RMS, value))
+
+
+def barge_in_frames() -> int:
+    """How many consecutive loud frames (JARVIS_BARGE_IN_MS) make a barge-in."""
+    try:
+        ms = float(os.environ.get("JARVIS_BARGE_IN_MS", BARGE_MIN_MS))
+    except ValueError:
+        ms = float(BARGE_MIN_MS)
+    if ms != ms:
+        ms = float(BARGE_MIN_MS)
+    return min(40, max(2, math.ceil(ms / (FRAME_SEC * 1000.0))))
+
+
 def model_name(language: Optional[str] = None) -> str:
     """The faster-whisper model to load. An English-only `.en` model is
     replaced by its multilingual twin for any other language."""
@@ -126,6 +197,12 @@ def _has_module(name: str) -> bool:
         return importlib.util.find_spec(name) is not None
     except (ImportError, ValueError):
         return False
+
+
+def _light_model(name: str) -> bool:
+    """A model small enough to transcribe every phrase it hears: up to `small`
+    (1.4 s for a 3.5 s phrase on an 8-core laptop, docs/stt-local.md)."""
+    return name.split(".")[0] in ("tiny", "base", "small")
 
 
 def whisper_installed() -> bool:
@@ -186,6 +263,12 @@ def problems() -> list[str]:
         out.append("faster-whisper is not installed")
     elif not whisper_model_cached():
         out.append(f"the Whisper model '{model_name()}' is not downloaded yet")
+    mute = os.environ.get("JARVIS_MUTE_MIC_DURING_SPEECH", "").strip().lower() in ("1", "true", "yes")
+    if barge_in_requested() and mute:
+        out.append("JARVIS_BARGE_IN has no effect while JARVIS_MUTE_MIC_DURING_SPEECH is on")
+    if wake_mode() == "whisper" and not _light_model(model_name()):
+        out.append(f"JARVIS_WAKE_WORD=whisper transcribes everything it hears, and the "
+                   f"'{model_name()}' model is too slow for that (JARVIS_STT_MODEL=base or small)")
     if wake_requested():
         if not wakeword_installed():
             out.append("openwakeword is not installed (no wake word: the microphone stays open)")
@@ -252,6 +335,63 @@ class EnergyVad:
             self.floor = level if self.floor == 0.0 else \
                 self.floor + FLOOR_ALPHA * (level - self.floor)
         return speech
+
+
+class BargeInDetector:
+    """Is the user talking OVER JARVIS? Pure, frame-driven, no clock.
+
+    While JARVIS speaks, the microphone hears him too. Three things keep his
+    own voice from counting as the user's:
+
+    * the browser's echo cancellation (asked for in `localmic.ts`) removes most
+      of it before it gets here;
+    * a frame only counts if it is at least `min_rms` (far above the 350 of the
+      phrase VAD) AND `ratio` times the echo level this detector has measured
+      during the same utterance (`echo`, a slow average of the frames below
+      the bar, so a user speaking up cannot raise his own bar);
+    * it must stay that loud, unbroken, for `frames` frames. Speech has gaps
+      between words, so an echo does not hold the bar for 400 ms; a person
+      who means to interrupt does.
+
+    The first `warmup` frames only learn the echo level and never fire. Call
+    `reset()` whenever JARVIS is not speaking: the next utterance starts over.
+    It fires once per utterance (`fired`).
+    """
+
+    def __init__(self, *, min_rms: float = BARGE_MIN_RMS, frames: int = 5,
+                 ratio: float = BARGE_RATIO, warmup: int = BARGE_WARMUP_FRAMES):
+        self._min = min_rms
+        self._need = max(1, frames)
+        self._ratio = ratio
+        self._warmup = max(0, warmup)
+        self.reset()
+
+    def reset(self) -> None:
+        self.echo = 0.0
+        self.fired = False
+        self._seen = 0
+        self._run = 0
+
+    @property
+    def threshold(self) -> float:
+        return max(self._min, self.echo * self._ratio)
+
+    def feed(self, frame: bytes) -> bool:
+        """One frame heard while JARVIS speaks; True on the frame that makes
+        a barge-in."""
+        level = frame_rms(frame)
+        self._seen += 1
+        if self._seen <= self._warmup:
+            self.echo = level if self._seen == 1 else self.echo + 0.5 * (level - self.echo)
+            return False
+        loud = level >= self.threshold
+        if not loud:
+            self.echo += BARGE_ALPHA * (level - self.echo)
+        self._run = self._run + 1 if loud else 0
+        if self._run >= self._need and not self.fired:
+            self.fired = True
+            return True
+        return False
 
 
 _WAKE_PREFIX = re.compile(
@@ -506,55 +646,137 @@ Emit = Callable[[dict], Awaitable[None]]
 class MicSession:
     """What one `/ws/mic` connection owns: the chunker, the state machine and
     (if enabled) the wake-word model. Audio goes in through `feed`; state
-    changes and finished phrases come out through the two callbacks."""
+    changes and finished phrases come out through the two callbacks.
+
+    Three opt-in behaviours, all off by default:
+
+    * `use_wake_word`: openWakeWord's `hey_jarvis` gates the phrase.
+    * `wake_text`: every phrase is transcribed and only the ones that start
+      with "Jarvis" go on (`wake_text.WakeGate`), with a conversation window.
+    * `barge_in`: while JARVIS speaks (`feed(..., speaking=True)`) the audio
+      goes to a `BargeInDetector` instead of the phrase listener; sustained
+      voice calls `on_barge_in` (the server cuts his speech) and the last
+      frames heard are replayed into the listener, so the user's first words
+      are not lost and the phrase does not start with JARVIS's own echo.
+    """
 
     def __init__(self, *, emit: Emit,
                  on_text: Callable[[str], Awaitable[None]],
                  stt: Optional[Transcriber] = None,
-                 use_wake_word: Optional[bool] = None):
+                 use_wake_word: Optional[bool] = None,
+                 wake_text_gate: Optional[bool] = None,
+                 window_sec: Optional[float] = None,
+                 barge_in: Optional[bool] = None,
+                 on_barge_in: Optional[Callable[[], Awaitable[None]]] = None,
+                 clock: Callable[[], float] = time.monotonic):
         self._emit = emit
         self._on_text = on_text
         self._stt = stt or transcriber()
         self.wake_word = wake_enabled() if use_wake_word is None else use_wake_word
         self._wake_engine = _make_wake() if self.wake_word else None
+        use_text = wake_text_enabled() if wake_text_gate is None else wake_text_gate
+        # One wake word at a time: the audio model, if asked for, wins.
+        self._gate = (wake_text.WakeGate(wake_window_sec() if window_sec is None else window_sec,
+                                         clock)
+                      if use_text and not self.wake_word else None)
+        self.wake_text = self._gate is not None
         self.listener = PhraseListener(
             wake_scorer=self._wake_engine.score if self._wake_engine else None)
         self._chunker = FrameChunker()
         self._last_phase = self.listener.phase
+        self._on_barge_in = on_barge_in
+        self._was_speaking = False
+        want_barge = barge_in_requested() if barge_in is None else barge_in
+        self.barge_in = bool(want_barge and on_barge_in is not None)
+        self._barge = (BargeInDetector(min_rms=barge_in_rms(), frames=barge_in_frames())
+                       if self.barge_in else None)
+        # What the microphone heard just before a barge-in fired.
+        self._recent: deque[bytes] = deque(
+            maxlen=barge_in_frames() + PREROLL_FRAMES + 2 if self.barge_in else 1)
 
     def reset(self) -> None:
         """Drop a half-heard phrase: the microphone was paused, or JARVIS is
         talking and `JARVIS_MUTE_MIC_DURING_SPEECH` is on."""
         self._chunker.reset()
         self.listener.reset()
+        self._recent.clear()
+        if self._barge is not None:
+            self._barge.reset()
 
     async def _announce(self) -> None:
         if self.listener.phase is not self._last_phase:
             self._last_phase = self.listener.phase
             await self._emit({"type": "state", "state": self.listener.phase.value})
 
-    async def feed(self, data: bytes) -> None:
+    async def _take(self, frame: bytes) -> None:
+        """One frame into the phrase listener, and what comes of it."""
         import lang
+        phrase = self.listener.feed(frame)
+        await self._announce()
+        if phrase is None:
+            return
+        try:
+            text = await self._stt.transcribe(phrase, lang.language())
+        except Exception as e:                      # model missing, OOM, ...
+            log.error("stt: transcription failed: %s", e)
+            await self._emit({"type": "error",
+                              "text": "Local speech recognition failed; see the server log."})
+            text = ""
+        self.listener.done()
+        await self._announce()
+        if self.wake_word:
+            text = strip_wake_word(text)
+        if text and is_hallucination(text):
+            text = ""
+        if text and self._gate is not None:
+            # Heard but not addressed to JARVIS: dropped here, and never
+            # logged or sent to the page.
+            text = self._gate.process(text) or ""
+        if text:
+            await self._on_text(text)
+
+    async def feed(self, data: bytes, speaking: bool = False) -> None:
         if len(data) > MAX_MESSAGE_BYTES:
             return
+        detector = self._barge if speaking else None
+        if self._barge is not None:
+            if not speaking:
+                self._barge.reset()
+                self._recent.clear()
+            elif not self._was_speaking:
+                # He just started: a phrase half-recorded before that has lost
+                # its continuation, which will not be fed to the listener.
+                self.listener.reset()
+        self._was_speaking = speaking
+        if speaking and self._gate is not None:
+            self._gate.keep_open()          # his answer must not use up the window
         for frame in self._chunker.feed(data):
-            phrase = self.listener.feed(frame)
-            await self._announce()
-            if phrase is None:
+            if detector is None or detector.fired:
+                # Not speaking, or already cut: from here the audio is the
+                # user's and goes to the phrase listener as usual.
+                await self._take(frame)
                 continue
-            try:
-                text = await self._stt.transcribe(phrase, lang.language())
-            except Exception as e:                      # model missing, OOM, ...
-                log.error("stt: transcription failed: %s", e)
-                await self._emit({"type": "error",
-                                  "text": "Local speech recognition failed; see the server log."})
-                text = ""
-            self.listener.done()
-            await self._announce()
-            if self.wake_word:
-                text = strip_wake_word(text)
-            if text and not is_hallucination(text):
-                await self._on_text(text)
+            # JARVIS is speaking and barge-in is on: the audio is only
+            # measured. Not transcribing his own voice is the other half of
+            # the saving.
+            self._recent.append(frame)
+            if detector.feed(frame):
+                await self._barge_in()
+
+    async def _barge_in(self) -> None:
+        log.info("stt: barge-in (the user spoke over JARVIS)")
+        heard = list(self._recent)
+        self._recent.clear()
+        self.listener.reset()
+        try:
+            if self._on_barge_in is not None:
+                await self._on_barge_in()
+        except Exception as e:
+            log.error("stt: barge-in handler failed: %s", e)
+        # The user's voice started a few frames ago: give those to the
+        # listener now, in order, so the phrase begins where he did.
+        for frame in heard:
+            await self._take(frame)
 
     def close(self) -> None:
         self._wake_engine = None
@@ -562,5 +784,11 @@ class MicSession:
 
 def ready_frame() -> dict:
     """First frame of a connection: what the page needs to know."""
-    return {"type": "ready", "sampleRate": SAMPLE_RATE,
-            "wakeWord": wake_enabled(), "model": model_name()}
+    frame = {"type": "ready", "sampleRate": SAMPLE_RATE,
+             "wakeWord": wake_enabled(), "model": model_name()}
+    # Only present when true, so the default frame is the one it always was.
+    if wake_text_enabled() and not wake_enabled():
+        frame["wake"] = "whisper"
+    if barge_in_requested():
+        frame["bargeIn"] = True
+    return frame

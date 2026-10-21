@@ -7116,11 +7116,18 @@ async def mic_handler(ws: WebSocket):
         if speech is not None:
             await _handle_final_transcript(text)
 
+    async def spoke_over() -> None:
+        # Voice, sustained, while he was talking: the same cut as the key and
+        # the button (`hush`), for the same reason: nothing is saved to say
+        # later. What cut him is the user's level and duration, never a word.
+        if speech is not None:
+            await speech.barge_in(keep_unread=False, reason="hush (voice)")
+
     try:
         # Off the event loop: building the session loads the wake-word model
         # (ONNX), and while it loads every websocket and the voice would stop.
         session = await asyncio.to_thread(
-            stt_local.MicSession, emit=emit, on_text=heard)
+            stt_local.MicSession, emit=emit, on_text=heard, on_barge_in=spoke_over)
     except Exception as e:
         log.error("stt: could not start the local recogniser: %s", e)
         await ws.send_json({"type": "error",
@@ -7138,7 +7145,8 @@ async def mic_handler(ws: WebSocket):
             await previous.close(code=4001)
         except Exception:
             pass
-    log.info("Mic WebSocket connected (wake word: %s)", session.wake_word)
+    log.info("Mic WebSocket connected (wake word: %s, text wake word: %s, barge-in: %s)",
+             session.wake_word, session.wake_text, session.barge_in)
     try:
         await ws.send_json(stt_local.ready_frame())
         while True:
@@ -7153,7 +7161,7 @@ async def mic_handler(ws: WebSocket):
                 if MUTE_MIC_DURING_SPEECH and speech is not None and speech.is_speaking:
                     session.reset()
                     continue
-                await session.feed(data)
+                await session.feed(data, speaking=bool(speech is not None and speech.is_speaking))
                 continue
             text = message.get("text")
             if text:
