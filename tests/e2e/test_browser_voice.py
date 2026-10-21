@@ -38,6 +38,15 @@ CHROMIUM_ARGS = [
 FIREFOX_PREFS = {
     "media.navigator.streams.fake": True,
     "media.navigator.permission.disabled": True,
+    # La página dibuja el orbe con WebGL (three.js) y, si no puede, su script
+    # se detiene antes de abrir ningún websocket. El Firefox sin GPU de la CI
+    # lo tiene en la lista de bloqueo: se fuerza el WebGL por software.
+    "webgl.force-enabled": True,
+    "webgl.disabled": False,
+    "webgl.enable-webgl2": True,
+    "webgl.forbid-software": False,
+    "gfx.webrender.software": True,
+    "layers.acceleration.disabled": True,
 }
 
 
