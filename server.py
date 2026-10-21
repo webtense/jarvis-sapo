@@ -67,6 +67,7 @@ from pydantic import BaseModel
 import actions
 import bridge
 import builds
+import i18n
 import preflight
 import stt_local
 import project_maker
@@ -642,7 +643,9 @@ def _fmt_reset(ts) -> str:
     try:
         when = datetime.fromtimestamp(float(ts))
     except (TypeError, ValueError, OSError, OverflowError):
-        return "later"
+        return i18n.t("later")
+    if i18n.is_es():
+        return i18n.reset_clock(when, (when.date() - datetime.now().date()).days)
     clock = when.strftime("%-I:%M %p").replace(":00 ", " ")   # "10:00 AM" -> "10 AM"
     days = (when.date() - datetime.now().date()).days
     if days <= 0:
@@ -719,18 +722,26 @@ async def _on_brain_state(state: str, info: dict) -> None:
         now = time.time()
         if now - _brain_notice_at["restarting"] > 60:
             _brain_notice_at["restarting"] = now
-            await speech.say("Rebooting my language systems, one moment.", Priority.NORMAL)
+            await speech.say(i18n.t("Rebooting my language systems, one moment."),
+                             Priority.NORMAL)
     elif state == "failed":
         line = (_AUTH_BRAIN_DOWN_LINE if info.get("failure_reason") == "auth"
                else "My language systems are down, sir. Check the server log.")
-        await speech.say(line, Priority.URGENT, immediate=True)
+        await speech.say(i18n.t(line), Priority.URGENT, immediate=True)
     elif state == "rate_limited":
-        await speech.say(f"I've hit the usage limit until {_fmt_reset(info.get('resets_at'))}, sir.",
-                         Priority.NORMAL)
+        await speech.say(
+            i18n.t(f"I've hit the usage limit until {_fmt_reset(info.get('resets_at'))}, sir."),
+            Priority.NORMAL)
 
 
 def _greeting() -> str:
     hour = datetime.now().hour
+    if i18n.is_es():
+        # In Spain "buenas tardes" runs until it is dark; the English cut-off
+        # at five would have him wishing a good night in the middle of the
+        # afternoon. The sentences are still the English ones, translated by
+        # `i18n.t` where they are said.
+        hour = 9 if hour < 14 else (13 if hour < 21 else 20)
     if hour < 12:
         return "Good morning, sir."
     if hour < 17:
@@ -1082,11 +1093,11 @@ async def _start_fresh() -> None:
         except Exception as e:
             log.error(f"fresh start failed: {e}", exc_info=True)
             if speech is not None:
-                await speech.say("I couldn't clear it, sir.", Priority.NORMAL)
+                await speech.say(i18n.t("I couldn't clear it, sir."), Priority.NORMAL)
             return
     log.info("fresh start: generation discarded at the user's request")
     if speech is not None:
-        await speech.say(FRESH_START_LINE, Priority.NORMAL)
+        await speech.say(i18n.t(FRESH_START_LINE), Priority.NORMAL)
 
 
 async def _maybe_rotate() -> None:
@@ -1117,7 +1128,7 @@ async def _maybe_rotate() -> None:
         # Say so before the pause, not after it: everything below this line
         # takes seconds during which nothing answers.
         try:
-            await _voice_emit({"type": "notice", "text": ROTATION_BUSY_LINE})
+            await _voice_emit({"type": "notice", "text": i18n.t(ROTATION_BUSY_LINE)})
             # The orb dims and slows for the duration; see the "compacting"
             # state in frontend/src/orb.ts.
             await _voice_emit({"type": "status", "state": "compacting"})
@@ -1206,6 +1217,8 @@ _NUMBER_WORDS = {
 
 
 def _say_number(n: int) -> str:
+    if i18n.is_es():
+        return i18n.NUMBER_WORDS_ES.get(n, str(n))
     return _NUMBER_WORDS.get(n, str(n))
 
 
@@ -1213,6 +1226,8 @@ def _list_join(items: list[str]) -> str:
     """'a', 'a and b', or 'a, b and c' — the Oxford-comma-free house style."""
     if len(items) == 1:
         return items[0]
+    if i18n.is_es():
+        return i18n.join_list(items)
     return ", ".join(items[:-1]) + f" and {items[-1]}"
 
 
@@ -1274,6 +1289,7 @@ async def _announce_needs_you(event: dict) -> None:
             line = f"{name} is {reason}, sir."
     else:
         line = f"{name} has stopped and wants you, sir."
+    line = i18n.t(line)
     try:
         await speech.say(line, Priority.URGENT)
     except Exception as e:
@@ -1319,6 +1335,8 @@ def _cap_listing(items: list[str]) -> str:
     if len(items) <= 3:
         return _list_join(items)
     remaining = len(items) - 3
+    if i18n.is_es():
+        return _list_join(items[:3]) + f", y {_say_number(remaining)} más"
     other_word = "other" if remaining == 1 else "others"
     return _list_join(items[:3]) + f", and {_say_number(remaining)} {other_word}"
 
@@ -1359,9 +1377,9 @@ async def _announce_batch() -> None:
 
     parts = []
     if names:
-        parts.append(_session_batch_line(names))
+        parts.append(i18n.t(_session_batch_line(names)))
     if projects:
-        parts.append(_run_batch_line(projects))
+        parts.append(i18n.t(_run_batch_line(projects)))
     line = " ".join(parts)
     try:
         await speech.say(line, Priority.LOW)
@@ -1443,7 +1461,7 @@ async def _announce_run_stalled(run: dict, outcome: str) -> None:
         line = (f"The work in {project} finished, sir, but I can't see that "
                 f"it changed anything.")
     try:
-        await speech.say(line, Priority.URGENT)
+        await speech.say(i18n.t(line), Priority.URGENT)
     except Exception as e:
         log.warning(f"run stall announcement failed: {e}")
 
@@ -1458,7 +1476,7 @@ async def _announce_run_failure(run: dict) -> None:
     else:
         line = f"The work in {project} failed, sir."
     try:
-        await speech.say(line, Priority.URGENT)
+        await speech.say(i18n.t(line), Priority.URGENT)
     except Exception as e:
         log.warning(f"run failure announcement failed: {e}")
 
@@ -1647,7 +1665,7 @@ async def _handle_utterance(text: str) -> None:
                     else "My language systems are down, sir.")
         else:
             line = "One moment, sir — my language systems are still starting."
-        await speech.say(line, Priority.NORMAL)
+        await speech.say(i18n.t(line), Priority.NORMAL)
         return
     # The brain is about to speak: a pending "keep this memory?" is no longer
     # the last question the user heard, so a "yes" must reach the brain.
@@ -1665,17 +1683,17 @@ async def _handle_utterance(text: str) -> None:
                 await speech.end_turn(utt)  # a turn that never ends would wedge the mouth
         except Exception as e:
             log.error(f"brain turn failed: {e}", exc_info=True)
-            await speech.say("I lost my train of thought, sir. Say that again?", Priority.NORMAL)
+            await speech.say(i18n.t("I lost my train of thought, sir. Say that again?"), Priority.NORMAL)
             return
         if result.stop_reason == "rate_limited":
             resets = (result.rate_limit or {}).get("resetsAt")
-            await speech.say(f"I've hit the usage limit until {_fmt_reset(resets)}, sir.", Priority.NORMAL)
+            await speech.say(i18n.t(f"I've hit the usage limit until {_fmt_reset(resets)}, sir."), Priority.NORMAL)
         elif result.stop_reason == "error":
             log.error(f"brain error: {result.error}")
-            await speech.say("My language systems returned an error, sir. Check the server log.",
+            await speech.say(i18n.t("My language systems returned an error, sir. Check the server log."),
                              Priority.NORMAL)
         elif result.stop_reason in ("timeout", "died", "not_running"):
-            await speech.say("I lost my train of thought, sir. Say that again?", Priority.NORMAL)
+            await speech.say(i18n.t("I lost my train of thought, sir. Say that again?"), Priority.NORMAL)
         elif not result.text.strip():
             await _voice_emit({"type": "status", "state": "idle"})
         log.info(f"JARVIS: {result.text.strip()[:300]}")
@@ -1880,10 +1898,10 @@ async def tts_test():
     GET is the one method OriginGuard cannot cover, so as a GET this was an
     <img> tag on any page the user visited, in a loop.
     """
-    audio = await synthesize_speech("Testing audio, sir.")
+    audio = await synthesize_speech(i18n.t("Testing audio, sir."))
     if audio:
         return {"audio": base64.b64encode(audio).decode()}
-    return {"audio": None, "error": "TTS failed"}
+    return {"audio": None, "error": i18n.t("TTS failed")}
 
 
 @app.get("/api/usage")
@@ -2013,7 +2031,7 @@ async def api_list_runs(status: str = "", project: str = "",
 async def api_get_run(run_id: str):
     run = run_store.get_run(run_id)
     if not run:
-        return JSONResponse(status_code=404, content={"error": "Run not found"})
+        return JSONResponse(status_code=404, content={"error": i18n.t("Run not found")})
     return {"run": run}
 
 
@@ -2057,11 +2075,11 @@ async def api_memory_doc(kind: str, slug: str):
     information and buys us nothing."""
     path = jarvis_memory.doc_path(kind, slug) if kind in MEMORY_DOC_KINDS else None
     if path is None:
-        return JSONResponse(status_code=404, content={"error": "Not found"})
+        return JSONResponse(status_code=404, content={"error": i18n.t("Not found")})
     try:
         text = path.read_text()
     except OSError:
-        return JSONResponse(status_code=404, content={"error": "Not found"})
+        return JSONResponse(status_code=404, content={"error": i18n.t("Not found")})
     return {"slug": slug, "text": text}
 
 
@@ -2184,10 +2202,10 @@ async def api_spec_document(project: str = "", path: str = "", root: str = ""):
     """
     directory = _project_path_or_none(project, root)
     if directory is None:
-        return JSONResponse(status_code=404, content={"error": "Not found"})
+        return JSONResponse(status_code=404, content={"error": i18n.t("Not found")})
     document = await asyncio.to_thread(specs.read_document, directory, path)
     if document is None:
-        return JSONResponse(status_code=404, content={"error": "Not found"})
+        return JSONResponse(status_code=404, content={"error": i18n.t("Not found")})
     return {"project": project, "root": directory, **document}
 
 
@@ -2308,7 +2326,9 @@ def _tool_reply(ok: bool, text: str, image: dict | None = None) -> dict:
     """The single funnel every /internal/tool return goes through, so the
     1,500-character cap — the brain's context budget — cannot be skipped by
     a refusal, an unknown-tool message, or exception text."""
-    reply = {"ok": ok, "text": _cap_tool_result(str(text))}
+    # Translated HERE, once, for every tool: the sentence is ours, anything it
+    # carries inside a placeholder or an untrusted block is copied untouched.
+    reply = {"ok": ok, "text": _cap_tool_result(i18n.t(str(text)))}
     if image is not None:
         reply["image"] = image
     return reply
@@ -2651,6 +2671,11 @@ last_mentioned_session: str | None = None
 
 
 def _say_age(seconds: float | None) -> str:
+    """The age in the spoken language (see `_say_age_english`)."""
+    return i18n.t(_say_age_english(seconds))
+
+
+def _say_age_english(seconds: float | None) -> str:
     """An age a person would say out loud. Never a timestamp: 'waiting since
     10:04' means nothing spoken aloud, 'waiting about an hour' does."""
     if seconds is None or seconds < 0:
@@ -3004,8 +3029,8 @@ def _phrase_needs(reason: str) -> str:
     """
     known = _NEEDS_PHRASES.get(reason)
     if known is not None:
-        return f"waiting on {known}"
-    return f"waiting on {_plain_phrase(reason, 'something I cannot name')}"
+        return i18n.t(f"waiting on {known}")
+    return i18n.t(f"waiting on {_plain_phrase(reason, 'something I cannot name')}")
 
 
 def _session_line(s, now) -> str:
@@ -3228,6 +3253,8 @@ def _join_natural(items: list[str]) -> str:
     list of one repeated word."""
     if len(items) <= 1:
         return ", ".join(items)
+    if i18n.is_es():
+        return i18n.join_list(items)
     return ", ".join(items[:-1]) + f" and {items[-1]}"
 
 
@@ -3428,7 +3455,7 @@ async def _perform_steer(item: _StagedSteer) -> None:
         if speech is None:
             record("no_voice")             # the mouth went away between turns
             return
-        utt = await speech.say(f"Telling {_said_name(item)}: {item.prompt}",
+        utt = await speech.say(i18n.t(f"Telling {_said_name(item)}: {item.prompt}"),
                                Priority.NORMAL)
         # Wait for the read-back to actually finish PLAYING (not merely be
         # queued — see READBACK_TIMEOUT) before opening the cancel window.
@@ -3443,7 +3470,7 @@ async def _perform_steer(item: _StagedSteer) -> None:
                 record("readback_failed")
                 return
             record("cancelled_by_user")
-            await speech.say("Cancelled, sir.", Priority.NORMAL)
+            await speech.say(i18n.t("Cancelled, sir."), Priority.NORMAL)
             return
         if not heard:
             # TTS wedged or the transport was abandoned mid-utterance: never
@@ -3452,7 +3479,7 @@ async def _perform_steer(item: _StagedSteer) -> None:
             return
         if await speech.open_cancel_window(STEER_CANCEL_WINDOW):
             record("cancelled_by_user")
-            await speech.say("Cancelled, sir.", Priority.NORMAL)
+            await speech.say(i18n.t("Cancelled, sir."), Priority.NORMAL)
             return
 
         outcome = await asyncio.to_thread(
@@ -3471,15 +3498,15 @@ async def _perform_steer(item: _StagedSteer) -> None:
             # here, so it is no longer asserted — and when the setting says
             # the message WILL need approving, that is said in the same
             # breath rather than left for the user to discover.
-            await speech.say(f"Passed to {_said_name(item)}, sir."
-                             + _inbound_caveat(), Priority.NORMAL)
+            await speech.say(i18n.t(f"Passed to {_said_name(item)}, sir."
+                             + _inbound_caveat()), Priority.NORMAL)
         elif outcome == session_steer.NOT_LIVE:
             await speech.say(
-                f"{_said_name(item)} didn't answer its socket, sir — it may "
-                f"have just exited.", Priority.NORMAL)
+                i18n.t(f"{_said_name(item)} didn't answer its socket, sir — it may "
+                f"have just exited."), Priority.NORMAL)
         else:
-            await speech.say(f"I couldn't deliver that to {_said_name(item)}, "
-                             f"sir.", Priority.NORMAL)
+            await speech.say(i18n.t(f"I couldn't deliver that to {_said_name(item)}, "
+                             f"sir."), Priority.NORMAL)
     except Exception:
         record("failed")                   # the audit trail must never have a gap
         raise
@@ -3530,7 +3557,7 @@ async def _perform_command(item: _StagedCommand) -> None:
         caveat = "" if item.documented else \
             " That isn't a command the project documents, mind."
         utt = await speech.say(
-            f"Running {item.command} in {item.project}, sir.{caveat}",
+            i18n.t(f"Running {item.command} in {item.project}, sir.{caveat}"),
             Priority.NORMAL)
         heard = await speech.wait_for(utt, timeout=READBACK_TIMEOUT)
         if utt.was_cancelled:
@@ -3538,14 +3565,14 @@ async def _perform_command(item: _StagedCommand) -> None:
                 record("readback_failed")
                 return
             record("cancelled_by_user")
-            await speech.say("Cancelled, sir.", Priority.NORMAL)
+            await speech.say(i18n.t("Cancelled, sir."), Priority.NORMAL)
             return
         if not heard:
             record("readback_failed")
             return
         if await speech.open_cancel_window(STEER_CANCEL_WINDOW):
             record("cancelled_by_user")
-            await speech.say("Cancelled, sir.", Priority.NORMAL)
+            await speech.say(i18n.t("Cancelled, sir."), Priority.NORMAL)
             return
 
         # `cd` into the project first: a start command means nothing in the
@@ -3557,10 +3584,10 @@ async def _perform_command(item: _StagedCommand) -> None:
         if result.get("success"):
             record("ran")
             await speech.say(
-                f"Running in a Terminal window, sir.", Priority.NORMAL)
+                i18n.t(f"Running in a Terminal window, sir."), Priority.NORMAL)
         else:
             record("failed")
-            await speech.say("Terminal wouldn't open, sir.", Priority.NORMAL)
+            await speech.say(i18n.t("Terminal wouldn't open, sir."), Priority.NORMAL)
     except Exception:
         record("failed")                   # the audit trail must never have a gap
         raise
@@ -3639,45 +3666,45 @@ async def _perform_dialog(item: _StagedDialog) -> None:
         # The read-back names the key AND warns about the focus theft, because
         # the window coming forward is the part that interrupts the user.
         utt = await speech.say(
-            f"Pressing {said} on {_said_name(item)} — this will bring that "
-            f"window forward.", Priority.NORMAL)
+            i18n.t(f"Pressing {said} on {_said_name(item)} — this will bring that "
+            f"window forward."), Priority.NORMAL)
         heard = await speech.wait_for(utt, timeout=READBACK_TIMEOUT)
         if utt.was_cancelled:
             if getattr(utt, "was_abandoned", False):
                 record("readback_failed")
                 return
             record("cancelled_by_user")
-            await speech.say("Cancelled, sir.", Priority.NORMAL)
+            await speech.say(i18n.t("Cancelled, sir."), Priority.NORMAL)
             return
         if not heard:
             record("readback_failed")
             return
         if await speech.open_cancel_window(STEER_CANCEL_WINDOW):
             record("cancelled_by_user")
-            await speech.say("Cancelled, sir.", Priority.NORMAL)
+            await speech.say(i18n.t("Cancelled, sir."), Priority.NORMAL)
             return
 
         outcome = await dialog.answer(item.pid, item.key)
         record(outcome)
         if outcome == dialog.SENT:
-            await speech.say(f"Pressed {said} on {_said_name(item)}.",
+            await speech.say(i18n.t(f"Pressed {said} on {_said_name(item)}."),
                              Priority.NORMAL)
         elif outcome == dialog.NOT_FOUND:
             await speech.say(
-                f"{_said_name(item)} isn't in a Terminal window I can reach, "
+                i18n.t(f"{_said_name(item)} isn't in a Terminal window I can reach, "
                 f"sir — another application is hosting it, so that one needs "
-                f"your own hand.", Priority.NORMAL)
+                f"your own hand."), Priority.NORMAL)
         elif outcome == dialog.NOT_PERMITTED:
             await speech.say(
-                "macOS won't let me send keystrokes, sir — I'd need accessibility "
-                "permission in System Settings.", Priority.NORMAL)
+                i18n.t("macOS won't let me send keystrokes, sir — I'd need accessibility "
+                "permission in System Settings."), Priority.NORMAL)
         elif outcome == dialog.NO_TTY:
             await speech.say(
-                f"{_said_name(item)} has no terminal of its own any more, "
-                f"sir — I pressed nothing.", Priority.NORMAL)
+                i18n.t(f"{_said_name(item)} has no terminal of its own any more, "
+                f"sir — I pressed nothing."), Priority.NORMAL)
         else:
-            await speech.say(f"I couldn't press that for {_said_name(item)}, "
-                             f"sir.", Priority.NORMAL)
+            await speech.say(i18n.t(f"I couldn't press that for {_said_name(item)}, "
+                             f"sir."), Priority.NORMAL)
     except Exception:
         record("failed")                   # the audit trail must never have a gap
         raise
@@ -4459,8 +4486,8 @@ def _running_now_summary() -> str:
     if len(active) == 1:
         return _describe_run(active[0])
     now = time.time()
-    items = [f"{_run_project(r)}, started "
-             f"{_say_age(now - (r.get('started_at') or r.get('created_at') or now))}"
+    items = [i18n.t(f"{_run_project(r)}, started "
+                    f"{_say_age(now - (r.get('started_at') or r.get('created_at') or now))}")
              for r in active]
     return (f"{_say_number(len(active)).capitalize()} runs going, sir: "
             f"{_cap_listing(items)}.")
@@ -5933,6 +5960,11 @@ _GH_PROBLEM_LINES = {
 
 
 def _github_age(pushed_at: str) -> str:
+    """The age in the spoken language (see `_github_age_english`)."""
+    return i18n.t(_github_age_english(pushed_at))
+
+
+def _github_age_english(pushed_at: str) -> str:
     """"about 3 hours ago" for an ISO timestamp, or "" if it is unreadable.
     Never a clock time: nobody hears "2026-09-02T14:46:03Z".
 
@@ -5980,11 +6012,12 @@ def _which_repo_question(candidates: list) -> str:
         if not gh_lookup.FULL_NAME_RE.fullmatch(full):
             continue
         owner, name = full.split("/", 1)
-        names.append(f"{owner}'s {name}")
+        names.append(f"{name} de {owner}" if i18n.is_es() else f"{owner}'s {name}")
     if not names:
         return "I found several of those, sir, and none I can name. Which one?"
     if len(names) > 1:
-        listed = ", ".join(names[:-1]) + f", or {names[-1]}"
+        listed = (", ".join(names[:-1]) + f", o {names[-1]}" if i18n.is_es()
+                  else ", ".join(names[:-1]) + f", or {names[-1]}")
     else:
         listed = names[0]
     return f"Several match, sir: {listed}. Which one?"
@@ -6600,9 +6633,9 @@ async def bridge_answer(body: _BridgeAnswer):
 @app.post("/api/bridge/memory/{pid}/{decision}")
 async def bridge_memory_decision(pid: str, decision: str):
     if decision not in ("confirm", "reject"):
-        return JSONResponse(status_code=404, content={"error": "Not found"})
+        return JSONResponse(status_code=404, content={"error": i18n.t("Not found")})
     if pid not in bridge_state.proposals:
-        return JSONResponse(status_code=404, content={"error": "Not found"})
+        return JSONResponse(status_code=404, content={"error": i18n.t("Not found")})
     return {"ok": True, "text": await _bridge_decide(pid, decision == "confirm")}
 
 
@@ -6629,7 +6662,7 @@ async def ws_sessions(websocket: WebSocket):
 @app.get("/api/runs/{run_id}/events")
 async def api_get_run_events(run_id: str, after_seq: int = 0, limit: int = 200):
     if not run_store.get_run(run_id):
-        return JSONResponse(status_code=404, content={"error": "Run not found"})
+        return JSONResponse(status_code=404, content={"error": i18n.t("Run not found")})
     # Clamp both ends: SQLite treats `LIMIT -1` as unlimited, so a negative
     # limit must not reach the query unbounded. Same discipline for
     # after_seq — a negative value is treated as "from the start" (0)
@@ -6651,7 +6684,7 @@ async def api_create_run(req: RunRequest):
     # server's own repo. Reject rather than guess.
     if not req.project_path or not req.project_path.strip():
         return JSONResponse(status_code=400,
-                            content={"error": "project_path is required"})
+                            content={"error": i18n.t("project_path is required")})
     # The SOURCE of the value every run sentence in this file then repeats.
     # It was taken verbatim from the request body, and where the body omits
     # it, from a directory name on disk — neither validated — and it lands in
@@ -6664,7 +6697,7 @@ async def api_create_run(req: RunRequest):
     if _plain_name(name, "") == "":
         return JSONResponse(
             status_code=400,
-            content={"error": "project_name must be an ordinary name"})
+            content={"error": i18n.t("project_name must be an ordinary name")})
     run_id = await run_executor_instance.spawn(
         req.prompt, name, req.project_path, "api",
         resume_from=req.resume_from, timeout_sec=req.timeout_sec)
@@ -6674,11 +6707,11 @@ async def api_create_run(req: RunRequest):
 @app.delete("/api/runs/{run_id}")
 async def api_cancel_run(run_id: str):
     if not run_store.get_run(run_id):
-        return JSONResponse(status_code=404, content={"error": "Run not found"})
+        return JSONResponse(status_code=404, content={"error": i18n.t("Run not found")})
     cancelled = await run_executor_instance.cancel(run_id)
     if not cancelled:
         return JSONResponse(status_code=409,
-                            content={"error": "Run is not active"})
+                            content={"error": i18n.t("Run is not active")})
     return {"run_id": run_id, "status": "cancelled"}
 
 
@@ -6686,13 +6719,13 @@ async def api_cancel_run(run_id: str):
 async def api_retry_run(run_id: str):
     original = run_store.get_run(run_id)
     if not original:
-        return JSONResponse(status_code=404, content={"error": "Run not found"})
+        return JSONResponse(status_code=404, content={"error": i18n.t("Run not found")})
     if original["status"] not in run_store.RunStatus.TERMINAL:
         # Retrying a run that is still going would double-spawn it: two
         # processes in the same directory, both forked from the same session.
         return JSONResponse(
             status_code=409,
-            content={"error": "Run is still active — cancel it first"})
+            content={"error": i18n.t("Run is still active — cancel it first")})
     new_id = await run_executor_instance.spawn(
         original["prompt"], original["project_name"],
         original["project_path"], "api", resume_from=run_id)
@@ -6795,7 +6828,7 @@ async def api_project_view_detail(name: str):
     views = await asyncio.to_thread(_project_views)
     match = next((v for v in views if v.name == name), None)
     if match is None:
-        return JSONResponse(status_code=404, content={"error": "Not found"})
+        return JSONResponse(status_code=404, content={"error": i18n.t("Not found")})
     repo, build = await asyncio.to_thread(
         lambda: (projects_view.repo_summary(match.primary_path, match.name),
                  projects_view.build_summary(match.primary_path)))
@@ -6827,7 +6860,7 @@ async def api_project_open(body: ProjectOpenRequest):
     match = next((v for v in views if v.name == body.name), None)
     if match is None or body.path not in match.paths:
         return JSONResponse(status_code=400,
-                            content={"error": "Unknown project or path"})
+                            content={"error": i18n.t("Unknown project or path")})
 
     if body.target == "editor":
         result = await actions.open_in_editor(body.path)
@@ -6836,7 +6869,7 @@ async def api_project_open(body: ProjectOpenRequest):
     elif body.target == "browser":
         result = await actions.open_browser(Path(body.path).as_uri())
     else:
-        return JSONResponse(status_code=400, content={"error": "Unknown target"})
+        return JSONResponse(status_code=400, content={"error": i18n.t("Unknown target")})
     return {"success": bool(result.get("success"))}
 
 
@@ -6875,7 +6908,7 @@ async def _handle_final_transcript(raw_text: str) -> None:
         # with different words. Never routed to _handle_utterance.
         log.info(f"User (replay): {text}")
         if not await speech.replay_last():
-            await speech.say(NOTHING_TO_REPLAY_LINE, Priority.NORMAL)
+            await speech.say(i18n.t(NOTHING_TO_REPLAY_LINE), Priority.NORMAL)
         return
     if verdict != "speech":
         # Say WHY, so a dropped sentence can be diagnosed from the
@@ -6936,7 +6969,7 @@ async def voice_handler(ws: WebSocket):
         global _last_greeting_time
         if speech is not None and time.time() - _last_greeting_time > 60:
             _last_greeting_time = time.time()
-            await speech.say(_greeting(), Priority.NORMAL)
+            await speech.say(i18n.t(_greeting()), Priority.NORMAL)
 
         while True:
             raw = await ws.receive_text()
@@ -7155,19 +7188,19 @@ def _env_value_max(key: str) -> int:
 def _env_value_problem(key: str, value: str) -> str | None:
     """Why `key=value` cannot be written into `.env`, or None if it can."""
     if len(value) > _env_value_max(key):
-        return (f"That setting is too long — {_env_value_max(key)} "
-                f"characters at most")
+        return i18n.t(f"That setting is too long — {_env_value_max(key)} "
+                      f"characters at most")
     if "\0" in value:
         # `splitlines()` does not split on NUL, so the round trip below would
         # not catch it — but it truncates the string for anything that hands
         # the value to a C API, so it keeps its own rule.
-        return "A setting cannot contain a null byte"
+        return i18n.t("A setting cannot contain a null byte")
     if value.splitlines() != ([value] if value else []):
-        return "A setting cannot contain a line break"
+        return i18n.t("A setting cannot contain a line break")
     if _ENV_CONTROL_RE.search(value):
-        return "A setting cannot contain a control character"
+        return i18n.t("A setting cannot contain a control character")
     if _parse_env_lines(f"{key}={value}") != [(key, value)]:
-        return "A setting cannot begin or end with a space or a quote"
+        return i18n.t("A setting cannot begin or end with a space or a quote")
     return None
 
 
@@ -7215,7 +7248,7 @@ def _write_env_key(key: str, value: str) -> None:
     separate setting.
     """
     if key not in SETTABLE_ENV_KEYS:
-        raise ValueError(f"{key} is not a setting JARVIS will write")
+        raise ValueError(i18n.t(f"{key} is not a setting JARVIS will write"))
     problem = _env_value_problem(key, value)
     if problem:
         raise ValueError(problem)
@@ -7259,7 +7292,7 @@ async def api_settings_keys(body: KeyUpdate):
 async def api_test_fish(body: KeyTest):
     key = body.key_value or os.getenv("FISH_API_KEY", "")
     if not key:
-        return {"valid": False, "error": "No key provided"}
+        return {"valid": False, "error": i18n.t("No key provided")}
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
@@ -7270,7 +7303,7 @@ async def api_test_fish(body: KeyTest):
             if resp.status_code in (200, 201):
                 return {"valid": True}
             elif resp.status_code == 401:
-                return {"valid": False, "error": "Invalid API key"}
+                return {"valid": False, "error": i18n.t("Invalid API key")}
             else:
                 return {"valid": False, "error": f"HTTP {resp.status_code}"}
     except Exception as e:
