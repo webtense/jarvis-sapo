@@ -2,7 +2,8 @@
 
 `VITE_JARVIS_LANG` se fija al COMPILAR el bundle (es lo que hace
 scripts/start-ubuntu.sh con `JARVIS_LANGUAGE`), así que cada idioma es un
-bundle distinto: `dist` (inglés, el de siempre) y `dist-es`. El mecanismo es el
+bundle distinto: `dist-en` (inglés, el de siempre) y `dist-es`; el `dist`
+que sirve el servicio no se toca. El mecanismo es el
 de `tests/dashboard_page.py`: bundle real, API simulada en un puerto local y el
 Chromium de Playwright. Sin red ni modelos; se omiten solos sin `npm` o sin
 Playwright.

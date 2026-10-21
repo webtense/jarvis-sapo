@@ -706,10 +706,33 @@ FRESH_START_PHRASES = (
 FRESH_START_LINE = "Cleared, sir — nothing of that conversation left. Go ahead."
 
 
+# The same request, said in Spanish. The Spanish persona tells him to say
+# "empezar de cero", and the English phrases above would never match it. Compared
+# with the accents folded away ("conversación" -> "conversacion"), because
+# `_action_words` keeps only a-z and would cut a word at its accent.
+FRESH_START_PHRASES_ES = (
+    "empezar de cero", "empieza de cero", "empecemos de cero",
+    "empezar de nuevo", "empieza de nuevo", "empecemos de nuevo",
+    "nueva conversacion", "conversacion nueva", "olvida esta conversacion",
+    "borron y cuenta nueva", "limpia tu contexto", "limpia tu memoria",
+)
+
+
+def _fold_accents(text: str) -> str:
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", text)
+                   if not unicodedata.combining(c))
+
+
 def _is_fresh_start(text: str) -> bool:
     """Whether the user just asked for a clean generation."""
     t = " ".join(_action_words(text))
-    return any(p in t for p in FRESH_START_PHRASES)
+    if any(p in t for p in FRESH_START_PHRASES):
+        return True
+    if i18n.is_es():
+        folded = " ".join(_action_words(_fold_accents(text)))
+        return any(p in folded for p in FRESH_START_PHRASES_ES)
+    return False
 
 
 def _action_words(text: str) -> list[str]:
@@ -1222,9 +1245,12 @@ _NUMBER_WORDS = {
 }
 
 
-def _say_number(n: int) -> str:
+def _say_number(n: int, form: str = "f") -> str:
+    """A small count in words. `form` only matters in Spanish, where "one"
+    follows the noun's gender: `f` "una" (the default: tareas,
+    conversaciones), `m` "un" and `alone` "uno"."""
     if i18n.is_es():
-        return i18n.NUMBER_WORDS_ES.get(n, str(n))
+        return i18n.number_word(n, form)
     return _NUMBER_WORDS.get(n, str(n))
 
 
@@ -1288,7 +1314,7 @@ async def _announce_needs_you(event: dict) -> None:
     name = _said_name(s, "A session")
     needs = s.get("needs")
     if needs:
-        reason = _phrase_needs(needs)
+        reason = _phrase_needs_english(needs)       # translated with the whole line
         if s.get("needs_a_human_hand"):
             line = f"{name} is {reason}, sir — that one needs your own keystroke."
         else:
@@ -1342,7 +1368,7 @@ def _cap_listing(items: list[str]) -> str:
         return _list_join(items)
     remaining = len(items) - 3
     if i18n.is_es():
-        return _list_join(items[:3]) + f", y {_say_number(remaining)} más"
+        return _list_join(items[:3]) + f", y {_say_number(remaining, 'alone')} más"
     other_word = "other" if remaining == 1 else "others"
     return _list_join(items[:3]) + f", and {_say_number(remaining)} {other_word}"
 
@@ -2826,8 +2852,12 @@ _PLAIN_NAME_RE = _action_re.compile(r"[\w.\-/+]{1,60}")
 
 
 def _plain_name(text: str, fallback: str) -> str:
+    """`text` if it is an ordinary name, else OUR fallback phrase — the one
+    place that phrase is translated. The sentence around it is translated as
+    a whole later, and a name that merely happens to read like a catalogue
+    entry ("later", "nothing", "Return") must be copied, never translated."""
     value = str(text)
-    return value if _PLAIN_NAME_RE.fullmatch(value) else fallback
+    return value if _PLAIN_NAME_RE.fullmatch(value) else i18n.t(fallback)
 
 
 # Two kinds of foreign value legitimately have SPACES in them: a `waitingFor`
@@ -2849,7 +2879,7 @@ _PLAIN_PHRASE_RE = _action_re.compile(r"\w([\w \-./+]{0,30}\w)?")
 
 def _plain_phrase(text: str, fallback: str) -> str:
     value = str(text)
-    return value if _PLAIN_PHRASE_RE.fullmatch(value) else fallback
+    return value if _PLAIN_PHRASE_RE.fullmatch(value) else i18n.t(fallback)
 
 
 # A conversation's voice name, as JARVIS may say it or write it to the brain.
@@ -2912,7 +2942,7 @@ def _said_name(item, fallback: str = "that session") -> str:
         value = str(item.get("voice_name") or "")
     else:
         value = str(getattr(item, "voice_name", "") or "")
-    return value if _VOICE_NAME_RE.fullmatch(value) else fallback
+    return value if _VOICE_NAME_RE.fullmatch(value) else i18n.t(fallback)
 
 
 # --- JARVIS's own runs are not the user's conversations ------------------
@@ -3033,10 +3063,18 @@ def _phrase_needs(reason: str) -> str:
     repeats the raw reason inside its untrusted block, so nothing is lost
     even when this rejects.
     """
+    return i18n.t(_phrase_needs_english(reason))
+
+
+def _phrase_needs_english(reason: str) -> str:
+    """`_phrase_needs` before the language layer: "waiting on a dialog".
+    `_announce_needs_you` builds its sentence from this one, so the whole line
+    reaches `i18n.t` in English and the frame only matches a reason that was
+    really translated (see the `:req` marker in the catalogue)."""
     known = _NEEDS_PHRASES.get(reason)
     if known is not None:
-        return i18n.t(f"waiting on {known}")
-    return i18n.t(f"waiting on {_plain_phrase(reason, 'something I cannot name')}")
+        return f"waiting on {known}"
+    return f"waiting on {_plain_phrase(reason, 'something I cannot name')}"
 
 
 def _session_line(s, now) -> str:
@@ -4686,7 +4724,7 @@ def _browser_for(args: dict) -> tuple[str | None, str | None]:
     picked = _BROWSER_NAMES.get(asked)
     if picked is None:
         return None, (f"I can only drive Chrome or Firefox, sir, not "
-                      f"{_plain_name(asked, 'that')} — I've opened nothing.")
+                      f"{_plain_name(asked, i18n.pick('that', 'ese'))} — I've opened nothing.")
     return picked, None
 
 
@@ -6003,7 +6041,7 @@ def _spoken_repo_name(full_name: str) -> str:
     whose `<title>` wrote its own untrusted wrapper is why.
     """
     return full_name if gh_lookup.FULL_NAME_RE.fullmatch(str(full_name)) \
-        else "That repository"
+        else i18n.t("That repository")
 
 
 def _which_repo_question(candidates: list) -> str:
@@ -6232,8 +6270,8 @@ def tool_connections(args: dict) -> str:
     if wanted:
         match = next((s for s in connected + failed if s.lower() == wanted), None)
         if match is None:
-            others = ", ".join(connected) or "nothing"
-            return (f"Nothing called {_plain_name(wanted, 'that')} is "
+            others = ", ".join(connected) or i18n.t("nothing")
+            return (f"Nothing called {_plain_name(wanted, i18n.pick('that', 'ese nombre'))} is "
                     f"connected, sir. What is: {others}. Add one in "
                     f"{data_paths.connections_path()}.")
         if match in failed:

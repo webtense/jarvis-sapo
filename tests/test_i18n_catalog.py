@@ -5,8 +5,10 @@ si fallan solo se ven con el panel abierto en castellano (un texto que cae al
 inglés sin avisar) o rompen la compilación de la CI (una clave repetida en el
 objeto es un error de TypeScript).
 
-  * toda llamada `t("…")`, `tp(n, "…", "…")` o `tc("ctx", "…")` con texto
-    literal tiene su entrada en `frontend/src/i18n-es.ts`;
+  * toda llamada `t("…")`, `tp(n, "…", "…")`, `tc("ctx", "…")` o
+    `t1(n, "…")` con texto literal tiene su entrada en
+    `frontend/src/i18n-es.ts` (y `t1` además la de su singular, con contexto
+    "one");
   * el texto fijo del HTML marcado con `data-i18n*` también;
   * una traducción conserva las {variables} de su original, y no hay claves
     repetidas.
@@ -73,14 +75,16 @@ def _call_site_keys() -> dict[str, str]:
         if path.name in ("i18n.ts", "i18n-es.ts"):
             continue
         src = path.read_text()
-        for m in re.finditer(r"(?<![\w.])(tp|tc|t)\(", src):
+        for m in re.finditer(r"(?<![\w.])(t1|tp|tc|t)\(", src):
             kind, i = m.group(1), m.end()
-            if kind in ("tp", "tc"):
+            if kind in ("tp", "tc", "t1"):
                 i = _skip_arg(src, i)
             first = _concat(src, i)
             if first is None:
                 continue              # argumento dinámico: va en DYNAMIC
             keys[first[0]] = path.name
+            if kind == "t1":
+                keys["one\u0004" + first[0]] = path.name
             if kind == "tp":
                 j = first[1]
                 while src[j] in WS:
@@ -192,3 +196,27 @@ def test_the_english_default_never_reads_the_catalogue():
     src = (SRC / "i18n.ts").read_text()
     assert 'CURRENT === "es" ? (ES[text] ?? text) : text' in src
     assert 'if (CURRENT !== "es") return;' in src
+
+
+def test_the_catalogue_has_the_singular_of_every_t1_text():
+    """`t1(n, text)` shows `one\\u0004text` when n is 1 in Castilian: "1 activo",
+    not "1 activos". Every text passed to it needs that second entry."""
+    cat, _ = _catalogue()
+    singles = {k for k, f in _call_site_keys().items() if k.startswith("one\u0004")}
+    assert singles, "no t1 call found: the scan is broken"
+    assert sorted(k for k in singles if k not in cat) == []
+    for key in singles:
+        plain = key.split("\u0004", 1)[1]
+        assert cat[key] != cat[plain], key
+
+
+def test_a_singular_never_keeps_the_plural_ending():
+    cat, _ = _catalogue()
+    for key, value in cat.items():
+        if key.startswith("one\u0004"):
+            assert "{n} activos" not in value and "{n} lanzados" not in value, key
+
+
+def test_t1_is_the_plain_text_in_english():
+    src = (SRC / "i18n.ts").read_text()
+    assert 'if (CURRENT !== "es" || n !== 1) return t(text, vars);' in src

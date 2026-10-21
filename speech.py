@@ -136,6 +136,10 @@ class Priority(IntEnum):
 
 
 BRIDGES = ("As I was saying —", "Back to it —", "Where was I —")
+# What he says on picking up a sentence that was interrupted, in Spanish. Used
+# only with JARVIS_LANGUAGE=es and the default `bridges`: a caller that passes
+# its own (the tests) gets exactly what it passed.
+BRIDGES_ES = ("Como decía:", "Retomo lo que decía:", "¿Por dónde iba?")
 CANCEL_WORDS = ("wait", "no", "stop", "cancel", "hold on")
 # What a Spanish speaker says to cut JARVIS off. Added to the English set, not
 # in place of it (a Spanish user still says "stop" now and then), and only when
@@ -143,6 +147,7 @@ CANCEL_WORDS = ("wait", "no", "stop", "cancel", "hold on")
 CANCEL_WORDS_ES = ("espera", "para", "para ya", "basta", "cancela", "detente",
                    "alto", "un momento", "un segundo")
 UNREAD_PREFIX = "Before I forget —"
+UNREAD_PREFIX_ES = "Antes de que se me olvide:"
 # The last resort, and only that. An unacked chunk's tokens count as echo
 # because the chunk may still be coming out of the speaker — and nothing plays
 # for two minutes, so this number is not a claim about audio. It is the bound
@@ -428,6 +433,8 @@ class SpeechScheduler:
         self.stale_after = stale_after
         self.echo_window = echo_window
         self.bridges = bridges
+        if bridges is BRIDGES and lang.language() == "es":
+            self.bridges = BRIDGES_ES
         self.cancel_words = tuple(cancel_words)
         if cancel_words is CANCEL_WORDS and lang.language() == "es":
             self.cancel_words += CANCEL_WORDS_ES
@@ -1044,7 +1051,8 @@ class SpeechScheduler:
         if not self._user_silent(now) or not self._transport_ready():
             return
         if self._unread:
-            text = f"{UNREAD_PREFIX} " + " ".join(self._unread)
+            prefix = UNREAD_PREFIX_ES if lang.language() == "es" else UNREAD_PREFIX
+            text = f"{prefix} " + " ".join(self._unread)
             self._unread.clear()
             u = self._new(Priority.URGENT, "say", immediate=True)
             self._fill(u, text)

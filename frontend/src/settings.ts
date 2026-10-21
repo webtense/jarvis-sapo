@@ -40,6 +40,8 @@ let panelEl: HTMLElement | null = null;
 let isOpen = false;
 let isFirstTimeSetup = false;
 let setupStep = 0; // 0=fish, 1=name, 2=done
+/** The last status the server gave, so "Test" can tell whether there is a saved key. */
+let lastStatus: StatusResponse | null = null;
 
 // ---------------------------------------------------------------------------
 // API helpers
@@ -241,6 +243,7 @@ function paintVoice(status: StatusResponse) {
 async function loadStatus() {
   try {
     const status = await apiGet<StatusResponse>("/api/settings/status");
+    lastStatus = status;
 
     setDotStatus("status-claude-cli", status.claude_code_installed ? "green" : "red");
     setDotStatus("status-server", "green");
@@ -327,8 +330,16 @@ function wireEvents() {
 
   // Test Fish
   document.getElementById("btn-test-fish")?.addEventListener("click", async () => {
-    setDotStatus("status-fish", "yellow");
     const key = (document.getElementById("input-fish-key") as HTMLInputElement).value.trim();
+    // An empty field and no saved key: there is nothing to test, and the key is
+    // optional. The dot goes back to what the status says (neutral with Piper
+    // answering, red only when there is no voice at all), not to "No key
+    // provided" in red.
+    if (!key && lastStatus && !lastStatus.env_keys_set.fish_audio) {
+      setDotStatus("status-fish", voiceMissing(lastStatus) ? "red" : "off");
+      return;
+    }
+    setDotStatus("status-fish", "yellow");
     try {
       const result = await apiPost<{ valid: boolean; error?: string }>("/api/settings/test-fish", { key_value: key || undefined });
       setDotStatus("status-fish", result.valid ? "green" : "red");

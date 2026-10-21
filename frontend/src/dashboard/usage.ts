@@ -29,7 +29,7 @@ import {
   type AgentUsage, type RunStats, type SessionUsage, type Tokens,
   type UsageSessions, type UsageSnapshot,
 } from "./api";
-import { t, tp, loc, unit, ago, fmtInt, fmtFixed } from "../i18n";
+import { t, t1, tp, loc, unit, ago, fmtInt, fmtFixed } from "../i18n";
 import {
   el, bar, pill, panel, readout, row, sparkline, stack, emptyState, setTone,
   type SparklineParts, type Tone,
@@ -301,7 +301,7 @@ function sessionRow(s: SessionUsage, peak: number): HTMLElement {
       tp(s.active_agents, "{n} agent active", "{n} agents active"),
       "accent"));
   } else if (s.agents.length > 0) {
-    r.addTrail(pill(t("{n} dispatched", { n: s.agents.length }), "idle", "ghost"));
+    r.addTrail(pill(t1(s.agents.length, "{n} dispatched", { n: s.agents.length }), "idle", "ghost"));
   }
 
   r.addMeta(`${fmtCount(s.total_tokens.total)} tok`, { w: "76px", strong: true });
@@ -378,9 +378,9 @@ function renderSessions(host: HTMLElement, meta: (t: string) => void): void {
     const proven = shown.length <= scan.largest_listed;
     host.append(el("div", "usage-more",
       proven
-        ? t("{n} smaller conversations not listed. "
+        ? t1(rest, "{n} smaller conversations not listed. "
           + "The totals above count every one of them.", { n: rest })
-        : t("{n} other conversations not listed. "
+        : t1(rest, "{n} other conversations not listed. "
           + "The totals above count every one of them.", { n: rest })));
   }
 }
