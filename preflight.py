@@ -530,7 +530,7 @@ def _check_local_stt_sync() -> Check:
              if stt_local.mode() == "browser" else "it will download on first use")
     return Check(
         name="local_stt", status=STATUS_WARN,
-        message="JARVIS_STT=local is set but " + "; ".join(gaps) + f" ({using}).",
+        message=f"JARVIS_STT={stt_local.requested_mode()} is set but " + "; ".join(gaps) + f" ({using}).",
         remedy="JARVIS_INSTALL_STT=1 scripts/install-ubuntu.sh",
     )
 
