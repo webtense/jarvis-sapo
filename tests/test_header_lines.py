@@ -519,6 +519,25 @@ EXEMPT = {
         "response envelope, never rendered into prose"),
     "ha_readonly_mcp.main": (
         "the same JSON-RPC envelope id, echoed on the internal-error path"),
+    "google_readonly_mcp.calendar_events": (
+        "the read-only Google connection is a separate stdio process, not a "
+        "session or a run. `summary`/`location` here are Calendar event fields "
+        "written by third parties: every one passes `_clean` (control characters "
+        "stripped, truncated) and is returned under UNTRUSTED_HEADER; "
+        "tests/test_google_readonly.py drives it"),
+    "google_readonly_mcp.tasks_list": (
+        "the same: Google Tasks titles and notes, cleaned and marked untrusted"),
+    "google_readonly_mcp.gmail_search": (
+        "the same: sender, subject and snippet of other people's mail, cleaned, "
+        "truncated and marked untrusted; never rendered as an instruction"),
+    "google_readonly_mcp.drive_search": (
+        "the same: Drive file names and their text, cleaned, truncated and "
+        "marked untrusted; never rendered as an instruction"),
+    "google_readonly_mcp.handle": (
+        "`id` is the JSON-RPC message id off the stdio channel, echoed in the "
+        "response envelope, never rendered into prose"),
+    "google_readonly_mcp.main": (
+        "the same JSON-RPC envelope id, echoed on the internal-error path"),
     "ha_watch.fetch_readings": (
         "the spoken-alerts watcher reads Home Assistant entity states, not a "
         "session or a run. Only `state`, a timestamp and a unit are kept (cut "
