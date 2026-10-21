@@ -76,6 +76,10 @@ Todos de solo lectura, nada de escritura:
 - `https://www.googleapis.com/auth/tasks.readonly`
 - `https://www.googleapis.com/auth/spreadsheets.readonly`
 
+Escribir en tu Google (crear eventos y tareas, notas en Drive) es otra pieza,
+opcional y apagada por defecto, con **su propio token** y confirmación hablada:
+ver `docs/google-escritura.md`. Esta conexión de lectura no cambia.
+
 ## Por qué un token aparte (y no el que ya tienes)
 
 Si ya tienes un token de escritura para tu cuenta personal (por ejemplo en

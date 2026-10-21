@@ -670,6 +670,55 @@ EXEMPT = {
         "sentence is `_describe_run`\'s and the task heading is "
         "`_build_progress_clause`\'s — all three driven. `project_name` "
         "appears once, in a `==` comparison"),
+
+    # google_actions.py's fields collide on NAME with a session's (`title`,
+    # `id`...) but hold none of its content: they are the user's OWN words for
+    # a calendar event/task/note, already cleaned by `Policy._one` /
+    # `_clean_text` (control characters stripped, length capped, no email
+    # address) before any of these functions sees them, or an id Google sent
+    # back and `_google_id` checked. What the f-strings build is either a JSON
+    # request BODY sent to Google, or the question JARVIS speaks to the user
+    # before asking his "yes" -- never a header line and never text handed
+    # back into the brain's context.
+    "google_actions._calendar_create": (
+        "`f[\"title\"]` is the user's own event title, cleaned by "
+        "`Policy._one`, going into the JSON body of the one closed POST this "
+        "function makes"),
+    "google_actions._calendar_update": (
+        "the same fields, same cleaning (`title` and the `summary` key of the "
+        "body it builds), into the JSON body of the one closed PATCH this "
+        "function makes"),
+    "google_actions._task_create": (
+        "`f[\"title\"]` is the user's own task title, cleaned by "
+        "`Policy._one`, into the JSON body of the one closed POST this "
+        "function makes"),
+    "google_actions._task_update": (
+        "the same fields, same cleaning, into the JSON body of the one "
+        "closed PATCH this function makes"),
+    "google_actions._note_create": (
+        "`f[\"title\"]` names the Google Doc created inside \"JARVIS Notas\"; "
+        "it is cleaned by `Policy._one` and reaches only the JSON bodies of "
+        "the Drive and Docs calls, and the `id` is one `_google_id` checked"),
+    "google_actions._notes_folder_id": (
+        "it reads nothing foreign: `NOTES_FOLDER_NAME` is this module's own "
+        "constant, and the `id` Google returns is checked by `_google_id` "
+        "before it is used in a body or a path"),
+    "google_actions._refresh_access_token": (
+        "it only COMPARES the `error` code Google's token endpoint sends "
+        "against \"invalid_grant\" and then raises a fixed code (`reauth`, "
+        "`token_http_<n>`); nothing from the response is printed or spoken"),
+    "google_actions._calendar_detail": (
+        "it joins the user's own, already cleaned event fields into the "
+        "phrase `question()` speaks BEFORE his \"yes\"; that sentence is "
+        "spoken to him, it never becomes a header line or a tool result"),
+    "google_actions._task_detail": (
+        "the same as `_calendar_detail`, for a task: the user's own cleaned "
+        "title, due date and notes, in the sentence he hears before he "
+        "answers"),
+    "google_actions.question": (
+        "it builds the sentence JARVIS speaks to the user from the validated "
+        "Action (his own cleaned title and texts) so he hears the whole "
+        "action before he answers; it is spoken, never put in a header line"),
 }
 
 

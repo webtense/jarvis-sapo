@@ -71,6 +71,7 @@ def test_command_has_exact_flags(tmp_path):
         "mcp__jarvis__remember,mcp__jarvis__recall,"
         "mcp__jarvis__project_note,mcp__jarvis__write_journal,"
         "mcp__jarvis__home_propose,"
+        "mcp__jarvis__google_propose,"
         # The CLI's own two, and the only built-ins here: without them JARVIS
         # can read a page he was given the address of and find nothing.
         "WebSearch,WebFetch")

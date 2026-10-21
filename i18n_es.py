@@ -533,6 +533,36 @@ PAIRS: list[tuple[str, str]] = [
     ("{name} is drawing {value} watts, above your limit, sir.",
      "{name} consume {value} vatios, por encima de su límite, señor."),
 
+    # --- writing to Google (google_actions.py) --------------------------------
+    # `{name}` is the user's own title and `{detail}` a phrase built in the
+    # spoken language (a date, a place, the text to write): both are copied.
+    ("Shall I create the event {name}, {detail}, in your calendar, sir?",
+     "¿Creo el evento {name}, {detail}, en su calendario, señor?"),
+    ("Shall I change that calendar event: {detail}, sir?",
+     "¿Cambio ese evento del calendario: {detail}, señor?"),
+    ("Shall I add {name} to your tasks, sir?", "¿Añado {name} a sus tareas, señor?"),
+    ("Shall I add {name} to your tasks, {detail}, sir?",
+     "¿Añado {name} a sus tareas, {detail}, señor?"),
+    ("Shall I change that task: {detail}, sir?", "¿Cambio esa tarea: {detail}, señor?"),
+    ("Shall I mark that task as complete, sir?",
+     "¿Marco esa tarea como completada, señor?"),
+    ("Shall I create a note titled {name} in your Drive, sir?",
+     "¿Creo una nota titulada {name} en su Drive, señor?"),
+    ("Shall I create a note titled {name} in your Drive, saying {detail}, sir?",
+     "¿Creo una nota titulada {name} en su Drive, con este texto: {detail}, señor?"),
+    ("Shall I add this to that note in your Drive: {detail}, sir?",
+     "¿Añado esto a esa nota de su Drive: {detail}, señor?"),
+    ("Shall I do that in Google, sir?", "¿Hago eso en Google, señor?"),
+    ("I couldn't reach Google, sir.", "No he podido contactar con Google, señor."),
+    ("Google refused it, sir.", "Google lo ha rechazado, señor."),
+    ("That isn't one of my notes, sir, so I haven't touched it.",
+     "Esa no es una de mis notas, señor, así que no la he tocado."),
+    ("Google's permission has expired, sir. It has to be renewed with the "
+     "authorisation script.",
+     "El permiso de Google ha caducado, señor. Hay que renovarlo con el script de autorización."),
+    ("I couldn't do that, sir: the Google connection is not set up properly.",
+     "No he podido hacerlo, señor: la conexión con Google no está bien configurada."),
+
     # --- settings API (shown by the UI) --------------------------------------
     ("No key provided", "No se ha indicado ninguna clave"),
     ("Invalid API key", "Clave de API no válida"),

@@ -35,8 +35,23 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
 ]
 
+# Minimal scopes for google_actions.py's write connection (docs/google-escritura.md):
+# calendar.events (create/update events, never a general calendar.readonly
+# grant that would also widen reads), tasks (the Tasks API offers no
+# narrower "events-only" scope), drive.file (sees only files THIS app
+# creates — the JARVIS Notas folder and the docs in it, nothing else in the
+# user's Drive), and the same identity scopes as the read-only connection.
+WRITE_SCOPES = [
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/tasks",
+    "https://www.googleapis.com/auth/drive.file",
+]
+
 DEFAULT_CLIENT_FROM = "~/.config/webtense_personal.json"
 DEFAULT_TOKEN_OUT = "~/.config/jarvis/google_readonly.json"
+DEFAULT_WRITE_TOKEN_OUT = "~/.config/jarvis/google_write.json"
 
 
 def _fail(message: str) -> None:
@@ -67,7 +82,7 @@ def load_client_config(client_from: Path) -> dict:
     return {"client_id": client_id, "client_secret": client_secret, "token_uri": token_uri}
 
 
-def build_token_payload(client_config: dict, credentials) -> dict:
+def build_token_payload(client_config: dict, credentials, scopes=SCOPES) -> dict:
     """Pure function: given a client config and an object with the attributes
     google-auth credentials expose, produce the dict written to disk. Kept
     separate from `_run_flow` so it is testable with a fake credentials
@@ -78,7 +93,7 @@ def build_token_payload(client_config: dict, credentials) -> dict:
         "client_id": client_config["client_id"],
         "client_secret": client_config["client_secret"],
         "token_uri": client_config["token_uri"],
-        "scopes": list(getattr(credentials, "scopes", None) or SCOPES),
+        "scopes": list(getattr(credentials, "scopes", None) or scopes),
     }
 
 
@@ -100,7 +115,7 @@ def write_token_file(token_path: Path, payload: dict) -> None:
         _fail("No se pudo escribir el fichero de token.")
 
 
-def _run_flow(client_config: dict):
+def _run_flow(client_config: dict, scopes=SCOPES):
     """The actual interactive OAuth flow. Imports google_auth_oauthlib lazily
     so the rest of this module (and its tests) never need it installed."""
     try:
@@ -115,28 +130,37 @@ def _run_flow(client_config: dict):
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "redirect_uris": ["http://localhost"],
     }}
-    flow = InstalledAppFlow.from_client_config(client_secrets, scopes=SCOPES)
+    flow = InstalledAppFlow.from_client_config(client_secrets, scopes=scopes)
     return flow.run_local_server(port=0)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Autoriza la conexion personal de Google de solo lectura para JARVIS.")
+        description="Autoriza la conexion personal de Google para JARVIS.")
     parser.add_argument("--client-from", default=DEFAULT_CLIENT_FROM,
                         help=f"Fichero del que reutilizar client_id/client_secret "
                              f"(por defecto {DEFAULT_CLIENT_FROM}).")
-    parser.add_argument("--token-out", default=DEFAULT_TOKEN_OUT,
-                        help=f"Donde guardar el token nuevo (por defecto {DEFAULT_TOKEN_OUT}).")
+    parser.add_argument("--token-out", default=None,
+                        help="Donde guardar el token nuevo (por defecto "
+                             f"{DEFAULT_TOKEN_OUT}, o {DEFAULT_WRITE_TOKEN_OUT} con --write).")
+    parser.add_argument("--write", action="store_true",
+                        help="Pide los scopes de ESCRITURA (Calendar, Tasks, Drive.file) "
+                             "para google_actions.py en vez de los de solo lectura "
+                             "(comportamiento por defecto sin esta opción). Ver "
+                             "docs/google-escritura.md.")
     args = parser.parse_args(argv)
 
+    scopes = WRITE_SCOPES if args.write else SCOPES
+    default_out = DEFAULT_WRITE_TOKEN_OUT if args.write else DEFAULT_TOKEN_OUT
     client_from = Path(os.path.expanduser(args.client_from))
-    token_out = Path(os.path.expanduser(args.token_out))
+    token_out = Path(os.path.expanduser(args.token_out or default_out))
 
     client_config = load_client_config(client_from)
-    credentials = _run_flow(client_config)
-    payload = build_token_payload(client_config, credentials)
+    credentials = _run_flow(client_config, scopes)
+    payload = build_token_payload(client_config, credentials, scopes)
     write_token_file(token_out, payload)
-    print(f"Autorizacion completada. Token guardado en: {token_out}")
+    kind = "de ESCRITURA" if args.write else "de solo lectura"
+    print(f"Autorizacion {kind} completada. Token guardado en: {token_out}")
     return 0
 
 

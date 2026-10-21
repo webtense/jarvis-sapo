@@ -274,6 +274,7 @@ SAMPLES = {
     "_KOKORO_VOICE_RE": "em_alex",
     "_EDGE_VOICE_RE": "es-ES-AlvaroNeural",
     "_PATH_RE": "/api/services/light/turn_on",
+    "_DATETIME_RE": "2026-10-21T18:00:00+02:00",
 }
 
 ALPHABET = ("abcdefghijklmnopqrstuvwxyz0123456789"

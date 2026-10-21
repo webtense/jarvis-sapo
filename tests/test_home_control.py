@@ -717,7 +717,10 @@ def test_the_tool_is_described_to_the_brain_only_when_home_control_is_configured
     home_actions.data_paths.home_actions_path().unlink()
     names = listed()
     assert "home_propose" not in names
-    assert names == {t["name"] for t in jarvis_mcp.TOOL_SPECS} - {"home_propose"}
+    # google_propose is its own independent gate (no google-actions.json in
+    # this fixture) and is hidden the same way; see test_google_control.py.
+    assert names == ({t["name"] for t in jarvis_mcp.TOOL_SPECS}
+                     - {"home_propose", "google_propose"})
     # the full table is untouched: the registry tests compare against it
     assert "home_propose" in {t["name"] for t in jarvis_mcp.TOOL_SPECS}
 

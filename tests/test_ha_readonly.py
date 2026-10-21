@@ -246,7 +246,8 @@ def test_protocol_basics():
 EXAMPLES = sorted((REPO / "jarvis_home" / "connections.examples").glob("*.json"))
 # Not MCP connections: the allow-list of home actions and the alert rules
 # (docs/casa-control.md). They have their own tests and are inactive too.
-_NOT_SERVERS = {"home-actions.json", "home-alerts.json", "ha-exclude.json"}
+_NOT_SERVERS = {"home-actions.json", "home-alerts.json", "ha-exclude.json",
+               "google-actions.json"}
 SERVER_EXAMPLES = [p for p in EXAMPLES if p.name not in _NOT_SERVERS]
 
 

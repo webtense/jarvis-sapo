@@ -110,6 +110,19 @@ def home_alerts_path() -> Path:
     return brain_home() / "home-alerts.json"
 
 
+def google_actions_path() -> Path:
+    """The user's allow-list for writing to Google (see `google_actions.py`).
+
+    A file the USER writes, beside home-actions.json: JARVIS never creates or
+    edits it, and with no file there is no writing to Google."""
+    return brain_home() / "google-actions.json"
+
+
+def google_actions_log_path() -> Path:
+    """Append-only JSONL audit of every Google write action asked for."""
+    return brain_home() / "google-actions.log"
+
+
 def ha_exclude_path() -> Path:
     """The user's Home Assistant exclusion list (see `ha_exclude.py`).
 

@@ -496,3 +496,62 @@ def test_google_auth_script_load_client_config_never_writes(tmp_path):
     cfg = mod.load_client_config(fake_client)
     assert cfg["client_id"] == "abc" and cfg["client_secret"] == "def"
     assert fake_client.read_text() == before  # never modified
+
+
+# --- scripts/google-auth.py --write: a SEPARATE, minimal set of write scopes ---
+
+def _load_auth_script(name):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, REPO / "scripts" / "google-auth.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_write_scopes_are_minimal_and_disjoint_from_a_full_calendar_grant():
+    mod = _load_auth_script("google_auth_script_write1")
+    assert mod.WRITE_SCOPES and all(s for s in mod.WRITE_SCOPES)
+    assert "https://www.googleapis.com/auth/calendar.events" in mod.WRITE_SCOPES
+    assert "https://www.googleapis.com/auth/tasks" in mod.WRITE_SCOPES
+    assert "https://www.googleapis.com/auth/drive.file" in mod.WRITE_SCOPES
+    # never the broad calendar scope, never Gmail, never general Drive access
+    assert "https://www.googleapis.com/auth/calendar" not in mod.WRITE_SCOPES
+    assert not any("gmail" in s for s in mod.WRITE_SCOPES)
+    assert not any(s.endswith("/auth/drive") for s in mod.WRITE_SCOPES)
+    # and the read-only connection's scopes stay read-only, untouched by this
+    assert all("readonly" in s or s in ("openid",) or s.endswith("/userinfo.email")
+              for s in mod.SCOPES if "calendar" in s or "drive" in s or "tasks" in s
+              or "spreadsheets" in s or "gmail" in s)
+
+
+def test_write_flag_selects_the_write_scopes_and_a_different_default_output(tmp_path, monkeypatch):
+    mod = _load_auth_script("google_auth_script_write3")
+    captured = {}
+
+    def fake_run_flow(client_config, scopes=mod.SCOPES):
+        captured["scopes"] = scopes
+        class FakeCreds:
+            token = "fresh-write-access-token"       # gitleaks:allow
+            refresh_token = "fresh-write-refresh-token"  # gitleaks:allow
+        return FakeCreds()
+
+    monkeypatch.setattr(mod, "_run_flow", fake_run_flow)
+    client_from = tmp_path / "client.json"
+    client_from.write_text(json.dumps({"installed": {
+        "client_id": "abc", "client_secret": "def",  # gitleaks:allow
+        "token_uri": "https://oauth2.googleapis.com/token"}}))
+    token_out = tmp_path / "jarvis" / "google_write.json"
+
+    rc = mod.main(["--client-from", str(client_from), "--token-out", str(token_out), "--write"])
+    assert rc == 0
+    assert captured["scopes"] == mod.WRITE_SCOPES
+    stored = json.loads(token_out.read_text())
+    assert stored["access_token"] == "fresh-write-access-token"
+    assert stored["scopes"] == mod.WRITE_SCOPES
+    assert (token_out.stat().st_mode & 0o777) == 0o600
+
+
+def test_without_write_the_default_output_path_differs_from_writes():
+    mod = _load_auth_script("google_auth_script_write4")
+    assert mod.DEFAULT_TOKEN_OUT != mod.DEFAULT_WRITE_TOKEN_OUT
+    assert "write" in mod.DEFAULT_WRITE_TOKEN_OUT

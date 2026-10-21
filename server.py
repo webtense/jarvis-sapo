@@ -68,6 +68,7 @@ import actions
 import admin_panel
 import bridge
 import ha_watch
+import google_actions
 import home_actions
 import builds
 import i18n
@@ -2473,6 +2474,9 @@ TAINT_EXEMPT_TOOLS = {
     "write_journal": "it writes the journal, it does not read",
     "home_propose": ("it only PROPOSES an action on the house: nothing is sent "
                      "until the user says yes aloud, and it reads nothing"),
+    "google_propose": ("it only PROPOSES a write to the user's personal Google "
+                       "account: nothing is sent until the user says yes aloud, "
+                       "and it reads nothing"),
 }
 
 # Acting tools that only ever bring back MORE content to read. They are gated
@@ -6608,7 +6612,7 @@ async def _bridge_announced_when_spoken(pid: str, utt, epoch: int) -> None:
         return
     if ok:
         pending = bridge_state.proposals.get(pid)
-        if pending is not None and pending.kind == "home":
+        if pending is not None and pending.kind in ("home", "google"):
             # The question was asked from INSIDE a brain turn, which may still
             # be talking. A "yes" is the user's answer to the question only
             # once the brain has finished: until then it might be answering
@@ -6638,9 +6642,11 @@ def _bridge_memory_exists(fact: str) -> bool:
 
 async def _bridge_decide(pid: str, accept: bool, *, spoken: bool = False) -> str:
     """The user's decision on one proposal. The only write in the bridge."""
-    pending_home = bridge_state.proposals.get(pid)
-    if pending_home is not None and pending_home.kind == "home":
+    pending_action = bridge_state.proposals.get(pid)
+    if pending_action is not None and pending_action.kind == "home":
         return await _home_decide(pid, accept, via="voice" if spoken else "panel")
+    if pending_action is not None and pending_action.kind == "google":
+        return await _google_decide(pid, accept, via="voice" if spoken else "panel")
     if spoken and accept:
         pending = bridge_state.proposals.get(pid)
         if pending is not None and _bridge_memory_exists(pending.fact):
@@ -6678,8 +6684,11 @@ async def _bridge_take_utterance(text: str) -> bool:
     if proposal is None:
         return False
     is_home = proposal.kind == "home"
-    decision = bridge.classify_decision(
-        text, strict=is_home, require_two=is_home and home_actions.confirm_strict())
+    is_google = proposal.kind == "google"
+    strict = is_home or is_google
+    require_two = (is_home and home_actions.confirm_strict()) or \
+        (is_google and google_actions.confirm_strict())
+    decision = bridge.classify_decision(text, strict=strict, require_two=require_two)
     if decision is None:
         return False
     line = await _bridge_decide(proposal.id, decision == "yes", spoken=True)
@@ -6866,6 +6875,153 @@ async def home_decision(pid: str, decision: str):
     if pending is None or pending.kind != "home":
         return JSONResponse(status_code=404, content={"error": i18n.t("Not found")})
     return {"ok": True, "text": await _home_decide(pid, decision == "confirm", via="panel")}
+
+
+# ---------------------------------------------------------------------------
+# Writing to the user's personal Google account: propose, ask aloud, act only
+# on the user's own "yes". Same pattern as home control, above.
+# ---------------------------------------------------------------------------
+#
+# Off unless the user wrote data/jarvis/google-actions.json
+# (google_actions.py has the policy and says what it protects). The brain's
+# only part is `google_propose`, which VALIDATES and STAGES one action as a
+# pending proposal (the same bridge mechanism as home control and memories,
+# with kind="google") and says it aloud in full. The action is performed by
+# `_google_decide`, called from the user's spoken yes (`_bridge_take_utterance`)
+# or from the panel, and never from a tool call, a transcript, another
+# session or anything read off Google itself.
+
+google_limits = google_actions.Limits()
+GOOGLE_PROPOSAL_TTL = 120.0
+_GOOGLE_TOOL_ARGS = ("action", "calendar_id", "event_id", "title", "start", "end",
+                    "duration_minutes", "location", "description", "task_list",
+                    "task_id", "notes", "due", "doc_id", "body", "text")
+
+
+async def tool_google_propose(args: dict) -> str:
+    """Stage ONE write action on the user's personal Google account and ask
+    him about it aloud. Never performs it. The text goes back to the brain,
+    not to the user."""
+    unknown = sorted(k for k in args if k not in _GOOGLE_TOOL_ARGS)
+    kind = str(args.get("action", ""))
+    try:
+        policy = google_actions.load_policy()
+    except google_actions.Disabled as e:
+        return (f"Google writing is not available: {e} Tell the user it is "
+                f"switched off; do not try another way.")
+    try:
+        if unknown:
+            raise google_actions.Refused("Arguments not allowed: "
+                                         + ", ".join(google_actions._safe_key(k) for k in unknown) + ".")
+        fields = {k: args[k] for k in _GOOGLE_TOOL_ARGS[1:] if k in args}
+        action = policy.check(kind, fields)
+    except google_actions.Refused as e:
+        google_actions.audit(None, confirmed_by="none", result=f"refused: {e}", kind=kind)
+        return f"Refused: {e} Tell the user plainly that you cannot do that."
+    if not google_limits.may_propose():
+        return ("Too many requests for Google in a few minutes. Tell the "
+                "user, and wait before proposing another.")
+    if not google_actions.audit_ready():
+        return ("The audit log cannot be written, so no action is proposed. "
+                "Tell the user.")
+    spoken = google_actions.question(action)
+    bridge_state.drop_kind("google")        # one pending action at a time
+    bridge_state.note_other_speech()
+    proposal = bridge_state.propose(spoken, "google", kind="google",
+                                    payload=action.as_dict(),
+                                    window=bridge.HOME_CONFIRM_WINDOW)
+    google_actions.audit(action, confirmed_by="none", result="proposed")
+    epoch = bridge_state.brain_epoch
+    utt = await _bridge_say(spoken, priority=Priority.NORMAL, immediate=False)
+    note = (" This is a dry run: nothing will really be touched."
+            if google_actions.dryrun() else "")
+    if utt is not None:
+        _spawn(_bridge_announced_when_spoken(proposal.id, utt, epoch))
+        return ("Pending the user's confirmation: JARVIS is asking him aloud, "
+                "word for word. NOTHING has been done. Say nothing more and "
+                "end your turn; never say it was done." + note)
+    if policy.panel_confirm:
+        return ("Pending the user's confirmation: nobody can hear JARVIS "
+                "speak right now, so nothing was said aloud. The proposal is "
+                "waiting to be confirmed or rejected on the control panel "
+                "instead. NOTHING has been done. Say nothing more and end "
+                "your turn; never say it was done." + note)
+    bridge_state.take(proposal.id)
+    return ("Nobody can hear JARVIS right now, so nothing was asked and "
+            "nothing was done. Tell the user.")
+
+
+TOOL_HANDLERS["google_propose"] = tool_google_propose
+ACTING_TOOLS.add("google_propose")
+
+
+async def _google_decide(pid: str, accept: bool, *, via: str) -> str:
+    """The user's yes or no to a pending Google write action. The only place
+    one is performed. Returns the sentence JARVIS says. `via` is "voice" or
+    "panel"."""
+    pending = bridge_state.proposals.get(pid)
+    if pending is None or pending.kind != "google":
+        return i18n.t("That request is no longer pending, sir.")
+    payload = pending.payload or {}
+    raw_kind = str(payload.get("kind", ""))
+    raw_fields = payload.get("fields") or {}
+
+    def log_raw(result: str) -> None:
+        google_actions.audit(None, confirmed_by=via, result=result, kind=raw_kind)
+
+    try:
+        policy = google_actions.load_policy()
+    except google_actions.Disabled:
+        policy = None
+    if accept and via == "panel" and (policy is None or not policy.panel_confirm):
+        return i18n.t("Confirm that one aloud, sir.")
+    bridge_state.take(pid)
+    if not accept:
+        log_raw("rejected")
+        return i18n.t("Understood, sir. I've done nothing.")
+    if bridge_state.now() - pending.created > GOOGLE_PROPOSAL_TTL:
+        log_raw("expired")
+        return i18n.t("That request has expired, sir. Ask me again.")
+    try:
+        if policy is None:
+            raise google_actions.Refused("Google writing is off")
+        action = policy.check(raw_kind, raw_fields)
+    except google_actions.Refused:
+        log_raw("refused: the allow-list changed")
+        return i18n.t("I can't do that any more, sir. The list of allowed actions has changed.")
+    if not google_limits.may_act(policy.max_per_minute):
+        google_actions.audit(action, confirmed_by=via, result="refused: too many per minute")
+        return i18n.t("Too many actions in a minute, sir. I'll wait.")
+    if not google_actions.audit_ready():
+        return i18n.t("I can't keep a record of it, sir, so I'll not do it.")
+    outcome = await asyncio.to_thread(google_actions.perform, action)
+    google_actions.audit(action, confirmed_by=via, result=outcome.code, result_id=outcome.result_id)
+    if outcome.ok:
+        if outcome.code == "dryrun":
+            return i18n.t("Dry run, sir: nothing was touched.")
+        return i18n.t("Done, sir.")
+    if outcome.code == "unreachable":
+        return i18n.t("I couldn't reach Google, sir.")
+    if outcome.code == "not_our_note":
+        return i18n.t("That isn't one of my notes, sir, so I haven't touched it.")
+    if outcome.code == "reauth":
+        return i18n.t("Google's permission has expired, sir. It has to be renewed "
+                      "with the authorisation script.")
+    if outcome.code.startswith(("http_", "redirect")):
+        return i18n.t("Google refused it, sir.")
+    return i18n.t("I couldn't do that, sir: the Google connection is not set up properly.")
+
+
+@app.post("/api/google/{pid}/{decision}")
+async def google_decision(pid: str, decision: str):
+    """The panel's yes or no. `confirm` only works if the user's allow-list
+    says `"panel_confirm": true`; `reject` always works."""
+    if decision not in ("confirm", "reject"):
+        return JSONResponse(status_code=404, content={"error": i18n.t("Not found")})
+    pending = bridge_state.proposals.get(pid)
+    if pending is None or pending.kind != "google":
+        return JSONResponse(status_code=404, content={"error": i18n.t("Not found")})
+    return {"ok": True, "text": await _google_decide(pid, decision == "confirm", via="panel")}
 
 
 # --- spoken alerts (ha_watch.py): opt-in, read only, never urgent but the alarm
