@@ -771,3 +771,53 @@ def test_the_mic_socket_accepts_a_page_in_auto_mode(client, monkeypatch):
 
 def test_the_recogniser_is_told_what_a_proper_noun_it_would_miss_looks_like():
     assert "Jarvis" in stt_local._PROMPTS["es"] and "Jarvis" in stt_local._PROMPTS["en"]
+
+
+# ── diagnóstico por frase: dice qué etapa la descartó, sin sus palabras ────
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text, expected", [
+    ("enciende la luz", "accepted"),
+    ("", "nothing recognised"),
+])
+async def test_each_phrase_leaves_one_line_saying_what_became_of_it(caplog, text, expected):
+    import logging
+
+    async def nothing(_): pass
+
+    session = MicSession(emit=nothing, on_text=nothing, stt=FakeTranscriber(text),
+                         use_wake_word=False)
+    with caplog.at_level(logging.INFO):
+        await session.feed(_phrase_audio())
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("stt: phrase")]
+    assert len(lines) == 1 and expected in lines[0]
+    assert "enciende" not in lines[0]               # the words are not logged by default
+
+
+@pytest.mark.asyncio
+async def test_the_words_are_logged_only_when_debugging_is_asked_for(caplog, monkeypatch):
+    import logging
+    monkeypatch.setenv("JARVIS_STT_DEBUG", "1")
+
+    async def nothing(_): pass
+
+    session = MicSession(emit=nothing, on_text=nothing, stt=FakeTranscriber("enciende la luz " * 10),
+                         use_wake_word=False)
+    with caplog.at_level(logging.INFO):
+        await session.feed(_phrase_audio())
+    line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("stt: phrase"))
+    assert "enciende la luz" in line and len(line) < 140      # cut to 60 characters
+
+
+@pytest.mark.asyncio
+async def test_a_phrase_without_the_wake_word_is_reported_as_such(caplog, monkeypatch):
+    import logging
+    async def nothing(_): pass
+
+    # The gate is asked for explicitly: whether it is on by default depends on
+    # faster-whisper being importable, which the CI runner does not have.
+    session = MicSession(emit=nothing, on_text=nothing, stt=FakeTranscriber("enciende la luz"),
+                         use_wake_word=False, wake_text_gate=True, window_sec=20)
+    with caplog.at_level(logging.INFO):
+        await session.feed(_phrase_audio())
+    assert any("no wake word" in r.getMessage() for r in caplog.records)

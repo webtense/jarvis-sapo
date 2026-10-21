@@ -724,14 +724,30 @@ class MicSession:
             text = ""
         self.listener.done()
         await self._announce()
+        heard = text
+        verdict = "accepted"
         if self.wake_word:
             text = strip_wake_word(text)
         if text and is_hallucination(text):
             text = ""
+            verdict = "hallucination"
         if text and self._gate is not None:
-            # Heard but not addressed to JARVIS: dropped here, and never
-            # logged or sent to the page.
+            # Heard but not addressed to JARVIS: dropped here and never sent
+            # to the page.
             text = self._gate.process(text) or ""
+            if not text:
+                verdict = "no wake word"
+        if not heard.strip():
+            verdict = "nothing recognised"
+        # One line per phrase, without its words: when "he did not hear me"
+        # this tells which stage dropped it. The words themselves are logged
+        # only when asked for (JARVIS_STT_DEBUG=1), cut short.
+        if os.environ.get("JARVIS_STT_DEBUG", "").strip() == "1":
+            log.info("stt: phrase %.1fs, %d chars, %s: %r", len(phrase) / 32000.0,
+                     len(heard), verdict, heard[:60])
+        else:
+            log.info("stt: phrase %.1fs, %d chars, %s", len(phrase) / 32000.0,
+                     len(heard), verdict)
         if text:
             await self._on_text(text)
 
