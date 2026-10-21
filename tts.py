@@ -432,11 +432,36 @@ def _load_voice(path: Optional[Path] = None):
         return _voice
 
 
+def piper_length_scale() -> float:
+    """How slowly Piper speaks: `PIPER_LENGTH_SCALE`, 1.0 (the voice's own pace)
+    by default, clamped to 0.7-1.6 (above 1 is slower). Anything that is not a
+    number is 1.0. Read every time, so the admin screen can change it live."""
+    try:
+        value = float(os.environ.get("PIPER_LENGTH_SCALE", "1.0"))
+    except ValueError:
+        return 1.0
+    if value != value:                                  # NaN
+        return 1.0
+    return min(1.6, max(0.7, value))
+
+
+def _piper_synthesis_config():
+    scale = piper_length_scale()
+    if scale == 1.0:
+        return None                                      # the untouched, original path
+    from piper import SynthesisConfig                    # optional dependency
+    return SynthesisConfig(length_scale=scale)
+
+
 def _piper_wav(text: str, voice: Optional[str] = None) -> bytes:
     loaded = _load_voice(piper_model_path(voice) if voice is not None else None)
     buf = io.BytesIO()
+    config = _piper_synthesis_config()
     with _synth_lock, wave.open(buf, "wb") as out:
-        loaded.synthesize_wav(text, out)
+        if config is None:
+            loaded.synthesize_wav(text, out)
+        else:
+            loaded.synthesize_wav(text, out, syn_config=config)
     return buf.getvalue()
 
 

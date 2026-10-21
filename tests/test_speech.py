@@ -307,11 +307,11 @@ async def test_echo_classification_with_the_name_honorific(h, monkeypatch):
     monkeypatch.setenv("USER_NAME", "Andrés")
     import i18n
     s = h.sched
-    said = i18n.t("Cancelled, sir.")
-    assert said == "Cancelado, Andrés."
+    said = i18n.t("Good morning, sir.")          # the name is only used to greet
+    assert said == "Buenos días, Andrés."
     await s.say(said)
     await asyncio.sleep(0.1)
-    assert s.classify("cancelado andrés") == "echo"
+    assert s.classify("buenos días andrés") == "echo"
     assert s.classify("yes please do that now") == "speech"
 
 

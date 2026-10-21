@@ -605,41 +605,42 @@ def test_every_pair_reads_well_without_the_honorific(es, monkeypatch):
 
 def test_every_pair_reads_well_addressed_by_name(es, monkeypatch):
     """Requirement: no sentence keeps "señor" once HONORIFIC=name, across
-    every shape the catalogue uses (", señor", "señor,", " señor.", and a bare
-    "señor")."""
+    every shape the catalogue uses. The name itself appears only in greetings:
+    said at every sentence it wears out."""
     monkeypatch.setenv("HONORIFIC", "name")
     monkeypatch.setenv("USER_NAME", "Andrés")
     for english, spanish in i18n_es.PAIRS:
         out = i18n._honorific_es(spanish)
         assert not re.search(r"\bseñor\b", out, re.IGNORECASE), (english, out)
-        if "señor" in spanish:
+        if "señor" in spanish and spanish.startswith(("Buenos ", "Buenas ", "Hola")):
             assert "Andrés" in out, (english, spanish, out)
+        else:
+            assert "Andrés" not in out, (english, spanish, out)
 
 
-def test_every_senor_shape_is_covered_by_the_name_substitution(es, monkeypatch):
-    """The four shapes the task calls out, each proven against a concrete
-    sentence rather than only the general sweep above."""
+def test_the_name_is_said_only_to_greet(es, monkeypatch):
     monkeypatch.setenv("HONORIFIC", "name")
     monkeypatch.setenv("USER_NAME", "Andrés")
-    assert i18n.t("Cancelled, sir.") == "Cancelado, Andrés."            # ", señor."
-    assert i18n.t("Which one, sir?") == "¿Cuál, Andrés?"                # ", señor?"
+    assert i18n.t("Good evening, sir.") == "Buenas noches, Andrés."
+    assert i18n.t("Cancelled, sir.") == "Cancelado."
+    assert i18n.t("Which one, sir?") == "¿Cuál?"
     assert (i18n.t("Cleared, sir — nothing of that conversation left. Go ahead.")
-            == "Hecho, Andrés: no queda nada de esa conversación. Adelante.")
-    assert i18n.t("hammer is waiting on a dialog, sir.") == \
-        "hammer está esperando un diálogo, Andrés."
+            == "Hecho: no queda nada de esa conversación. Adelante.")
+    assert i18n.t("hammer is waiting on a dialog, sir.") == "hammer está esperando un diálogo."
 
 
-def test_the_name_honorific_handles_accents_and_enye_and_case(es, monkeypatch):
+def test_the_greeting_handles_accents_and_enye_and_case(es, monkeypatch):
     monkeypatch.setenv("HONORIFIC", "name")
     for name in ("Andrés", "Begoña", "JOSÉ"):
         monkeypatch.setenv("USER_NAME", name)
-        assert i18n.t("Cancelled, sir.") == f"Cancelado, {name}."
+        assert i18n.t("Good morning, sir.") == f"Buenos días, {name}."
 
 
 def test_an_empty_name_behaves_as_none(es, monkeypatch):
     monkeypatch.setenv("HONORIFIC", "name")
     monkeypatch.setenv("USER_NAME", "")
     assert i18n.t("Cancelled, sir.") == "Cancelado."
+    assert i18n.t("Good morning, sir.") == "Buenos días."
     monkeypatch.delenv("USER_NAME", raising=False)
     assert i18n.t("Cancelled, sir.") == "Cancelado."
 
@@ -649,6 +650,7 @@ def test_a_name_with_control_characters_is_sanitised_to_none(es, monkeypatch):
     for bad in ("Mal\nicioso", "Mal\x1b[2Jicioso", "Mal\ricioso"):
         monkeypatch.setenv("USER_NAME", bad)
         assert i18n.t("Cancelled, sir.") == "Cancelado."
+        assert i18n.t("Good morning, sir.") == "Buenos días."
 
 
 def test_the_name_honorific_is_ignored_in_english(monkeypatch):
