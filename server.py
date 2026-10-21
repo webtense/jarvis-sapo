@@ -7388,7 +7388,10 @@ async def api_restart():
 from starlette.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 
-FRONTEND_DIST = Path(__file__).parent / "frontend" / "dist"
+# JARVIS_FRONTEND_DIST sirve otro build (las pruebas E2E llevan el de castellano
+# en su propia carpeta). Sin la variable es la ruta de siempre.
+FRONTEND_DIST = Path(os.environ.get("JARVIS_FRONTEND_DIST") or
+                     Path(__file__).parent / "frontend" / "dist")
 
 if FRONTEND_DIST.exists():
     @app.get("/")

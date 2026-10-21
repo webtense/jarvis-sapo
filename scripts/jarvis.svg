@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="JARVIS">
+  <defs>
+    <radialGradient id="core" cx="50%" cy="45%" r="55%">
+      <stop offset="0" stop-color="#e8fbff"/>
+      <stop offset="0.35" stop-color="#5fd6ff"/>
+      <stop offset="1" stop-color="#0a4f8f"/>
+    </radialGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="#06121f"/>
+  <circle cx="64" cy="64" r="46" fill="none" stroke="#1d6fb8" stroke-width="3" opacity="0.6"/>
+  <circle cx="64" cy="64" r="36" fill="none" stroke="#38b6ff" stroke-width="2" stroke-dasharray="6 8" opacity="0.8"/>
+  <circle cx="64" cy="64" r="24" fill="url(#core)"/>
+</svg>
