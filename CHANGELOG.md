@@ -12,7 +12,8 @@ Versionado semántico con prefijo `ubuntu-`. Uso personal y no comercial, igual 
 - `scripts/start-ubuntu.sh` arranca Vite directamente, sin `npm run`.
 - **Respaldo de voz**: si Fish Audio falla (402 por clave sin crédito, 401/403, red), JARVIS habla con Piper en vez de quedarse mudo: en modo `auto` la frase que encuentra el fallo y las siguientes (10 min si la cuenta rechaza la clave, 1 min si es la red) salen por Piper, y un éxito de Fish borra el aviso. El panel de Ajustes muestra el proveedor realmente en uso.
 - Los mensajes de micrófono del navegador (permiso bloqueado, otra aplicación lo usa, reconocimiento perdido) salen en castellano.
-- Conocido y pendiente: frases con nombres de fichero/proyecto idénticos a una entrada del catálogo ("later", "nothing") se traducen; las palabras de cancelar/repetir en castellano ("para", "repite") aún no se reconocen; voz real en Firefox sin probar.
+- **Cancelar y repetir en castellano**: con `JARVIS_LANGUAGE=es`, "para", "cancela", "espera", "basta"... interrumpen a JARVIS y "repite", "repítelo", "¿qué has dicho?"... le piden repetir (se suman a las inglesas; una pregunta real como "¿qué quieres decir con eso?" sigue yendo al cerebro).
+- Conocido y pendiente: frases con nombres de fichero/proyecto idénticos a una entrada del catálogo ("later", "nothing") se traducen; voz real en Firefox sin probar.
 
 ## ubuntu-0.5.0 — voz local, puente MCP, casa en solo lectura
 - **F2c** voz de entrada local opcional (`JARVIS_STT=local`, faster-whisper) y palabra de activación "Hey Jarvis" (openWakeWord, `JARVIS_WAKE_WORD=on`). Desactivado por defecto; sin los paquetes opcionales todo sigue igual. Endpoint `/ws/mic` tras la misma puerta Origin/Host; el texto final entra por `_handle_final_transcript`.

@@ -58,3 +58,60 @@ def test_the_piper_voice_follows_the_language(monkeypatch, tmp_path):
     assert tts.piper_model_path().name == "en_GB-alan-medium.onnx"
     monkeypatch.setenv("PIPER_VOICE", "es_MX-claude-high")
     assert tts.piper_model_path().name == "es_MX-claude-high.onnx"
+
+
+# ── palabras de cancelar y de repetir ──────────────────────────────────────
+
+async def _nothing(*args, **kwargs):
+    return None
+
+
+def _scheduler():
+    import speech
+    return speech.SpeechScheduler(_nothing, _nothing)
+
+
+def test_spanish_adds_its_cancel_words_to_the_english_ones(monkeypatch):
+    import speech
+    monkeypatch.setenv("JARVIS_LANGUAGE", "es")
+    words = _scheduler().cancel_words
+    assert set(speech.CANCEL_WORDS) <= set(words)
+    assert {"para", "cancela", "espera", "basta", "un momento"} <= set(words)
+
+
+def test_english_keeps_exactly_its_original_cancel_words(monkeypatch):
+    import speech
+    monkeypatch.setenv("JARVIS_LANGUAGE", "en")
+    assert _scheduler().cancel_words == speech.CANCEL_WORDS
+
+
+def test_an_explicit_cancel_set_is_never_extended(monkeypatch):
+    import speech
+    monkeypatch.setenv("JARVIS_LANGUAGE", "es")
+    sched = speech.SpeechScheduler(_nothing, _nothing, cancel_words=("halt",))
+    assert sched.cancel_words == ("halt",)
+
+
+@pytest.mark.parametrize("said", [
+    "repite", "Repite eso", "repítelo", "perdona, repite eso por favor",
+    "Jarvis, repite", "¿qué has dicho?", "dilo otra vez", "otra vez"])
+def test_spanish_asks_to_hear_it_again(monkeypatch, said):
+    import speech
+    monkeypatch.setenv("JARVIS_LANGUAGE", "es")
+    assert speech._is_replay_request(speech._tokens(said)) is True
+
+
+@pytest.mark.parametrize("said", [
+    "¿qué quieres decir con eso?", "repite el nombre del proyecto en inglés",
+    "explícamelo otra vez con más detalle", "no", "perdón"])
+def test_spanish_real_questions_still_reach_the_brain(monkeypatch, said):
+    import speech
+    monkeypatch.setenv("JARVIS_LANGUAGE", "es")
+    assert speech._is_replay_request(speech._tokens(said)) is False
+
+
+def test_the_spanish_replay_words_do_nothing_in_english(monkeypatch):
+    import speech
+    monkeypatch.setenv("JARVIS_LANGUAGE", "en")
+    assert speech._is_replay_request(speech._tokens("repite")) is False
+    assert speech._is_replay_request(speech._tokens("repeat that")) is True
