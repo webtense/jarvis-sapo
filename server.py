@@ -69,6 +69,7 @@ import admin_panel
 import bridge
 import ha_watch
 import google_actions
+import whatsapp_actions
 import home_actions
 import builds
 import i18n
@@ -2477,6 +2478,9 @@ TAINT_EXEMPT_TOOLS = {
     "google_propose": ("it only PROPOSES a write to the user's personal Google "
                        "account: nothing is sent until the user says yes aloud, "
                        "and it reads nothing"),
+    "whatsapp_propose": ("it only PROPOSES one WhatsApp text to a contact on the "
+                         "user's own list: nothing is sent until the user says yes "
+                         "aloud, and it reads nothing"),
 }
 
 # Acting tools that only ever bring back MORE content to read. They are gated
@@ -6612,7 +6616,7 @@ async def _bridge_announced_when_spoken(pid: str, utt, epoch: int) -> None:
         return
     if ok:
         pending = bridge_state.proposals.get(pid)
-        if pending is not None and pending.kind in ("home", "google"):
+        if pending is not None and pending.kind in ("home", "google", "whatsapp"):
             # The question was asked from INSIDE a brain turn, which may still
             # be talking. A "yes" is the user's answer to the question only
             # once the brain has finished: until then it might be answering
@@ -6647,6 +6651,8 @@ async def _bridge_decide(pid: str, accept: bool, *, spoken: bool = False) -> str
         return await _home_decide(pid, accept, via="voice" if spoken else "panel")
     if pending_action is not None and pending_action.kind == "google":
         return await _google_decide(pid, accept, via="voice" if spoken else "panel")
+    if pending_action is not None and pending_action.kind == "whatsapp":
+        return await _whatsapp_decide(pid, accept, via="voice" if spoken else "panel")
     if spoken and accept:
         pending = bridge_state.proposals.get(pid)
         if pending is not None and _bridge_memory_exists(pending.fact):
@@ -6685,9 +6691,14 @@ async def _bridge_take_utterance(text: str) -> bool:
         return False
     is_home = proposal.kind == "home"
     is_google = proposal.kind == "google"
-    strict = is_home or is_google
+    is_whatsapp = proposal.kind == "whatsapp"
+    strict = is_home or is_google or is_whatsapp
+    # A WhatsApp message proposed in a turn that had read other people's
+    # messages always needs two deliberate words, whatever the opt-in says.
     require_two = (is_home and home_actions.confirm_strict()) or \
-        (is_google and google_actions.confirm_strict())
+        (is_google and google_actions.confirm_strict()) or \
+        (is_whatsapp and (whatsapp_actions.confirm_strict()
+                          or bool((proposal.payload or {}).get("tainted"))))
     decision = bridge.classify_decision(text, strict=strict, require_two=require_two)
     if decision is None:
         return False
@@ -7022,6 +7033,170 @@ async def google_decision(pid: str, decision: str):
     if pending is None or pending.kind != "google":
         return JSONResponse(status_code=404, content={"error": i18n.t("Not found")})
     return {"ok": True, "text": await _google_decide(pid, decision == "confirm", via="panel")}
+
+
+# ---------------------------------------------------------------------------
+# Sending a WhatsApp from the user's personal number: propose, ask aloud, act
+# only on the user's own "yes". Same pattern as home control and Google, above.
+# ---------------------------------------------------------------------------
+#
+# Off unless the user wrote data/jarvis/whatsapp-actions.json with
+# `"enabled": true` (whatsapp_actions.py has the policy and says what it
+# protects). The brain's only part is `whatsapp_propose`, which VALIDATES and
+# STAGES one text to one contact of the user's own list and says it aloud, the
+# recipient and the message whole. It is sent by `_whatsapp_decide`, called
+# from the user's spoken yes (`_bridge_take_utterance`) or from the panel, and
+# never from a tool call, a transcript, another session or a message that
+# arrived on WhatsApp.
+#
+# Two layers keep an incoming message from causing a send. First the general
+# gate above: `whatsapp_propose` is an acting tool, so it is refused in a turn
+# that has read anything foreign, and the WhatsApp reader (an MCP server of the
+# user's) taints the turn like every other one. Second, defence in depth: if
+# the brain's tool calls THIS turn include a WhatsApp reader, the proposal is
+# marked `tainted` and needs the two-word "yes, do it" even if the strict
+# option is off. The second only matters if the first ever misses a read.
+
+whatsapp_limits = whatsapp_actions.Limits()
+WHATSAPP_PROPOSAL_TTL = 120.0
+_WHATSAPP_TOOL_ARGS = ("contact", "text")
+_WHATSAPP_READER_RE = re.compile(r"mcp__[^_].*__whatsapp_(?:list_chats|read_chat|search)")
+
+
+def _turn_read_whatsapp() -> bool:
+    """Did the brain call a WhatsApp reader in the turn in flight? Read off
+    the tool_use names the brain recorded for this turn."""
+    names = getattr(brain_instance, "turn_tool_names", None) or ()
+    try:
+        return any(_WHATSAPP_READER_RE.fullmatch(str(n)) for n in names)
+    except TypeError:
+        return False
+
+
+async def tool_whatsapp_propose(args: dict) -> str:
+    """Stage ONE WhatsApp text and ask the user about it aloud. Never sends
+    it. The text goes back to the brain, not to the user."""
+    unknown = sorted(k for k in args if k not in _WHATSAPP_TOOL_ARGS)
+    contact = str(args.get("contact", ""))
+    try:
+        policy = whatsapp_actions.load_policy()
+    except whatsapp_actions.Disabled as e:
+        return (f"WhatsApp sending is not available: {e} Tell the user it is "
+                f"switched off; do not try another way.")
+    tainted = _turn_read_whatsapp()
+    try:
+        if unknown:
+            raise whatsapp_actions.Refused("Arguments not allowed: "
+                                           + ", ".join(whatsapp_actions._safe_key(k) for k in unknown) + ".")
+        action = whatsapp_actions.check(policy, args.get("contact"), args.get("text"), tainted)
+    except whatsapp_actions.Refused as e:
+        whatsapp_actions.audit(None, confirmed_by="none", result=f"refused: {e}",
+                               contact=contact, chars=len(str(args.get("text") or "")),
+                               tainted=tainted)
+        return f"Refused: {e} Tell the user plainly that you cannot do that."
+    if not whatsapp_limits.may_propose():
+        return ("Too many WhatsApp requests in a few minutes. Tell the user, "
+                "and wait before proposing another.")
+    if not whatsapp_actions.audit_ready():
+        return ("The audit log cannot be written, so nothing is proposed. "
+                "Tell the user.")
+    spoken = whatsapp_actions.question(action)
+    bridge_state.drop_kind("whatsapp")      # one pending message at a time
+    bridge_state.note_other_speech()
+    proposal = bridge_state.propose(spoken, "whatsapp", kind="whatsapp",
+                                    payload=action.as_dict(),
+                                    window=bridge.HOME_CONFIRM_WINDOW)
+    whatsapp_actions.audit(action, confirmed_by="none", result="proposed")
+    epoch = bridge_state.brain_epoch
+    utt = await _bridge_say(spoken, priority=Priority.NORMAL, immediate=False)
+    note = (" This is a dry run: nothing will really be sent."
+            if whatsapp_actions.dryrun() else "")
+    if utt is not None:
+        _spawn(_bridge_announced_when_spoken(proposal.id, utt, epoch))
+        return ("Pending the user's confirmation: JARVIS is asking him aloud, "
+                "word for word. NOTHING has been sent. Say nothing more and "
+                "end your turn; never say it was sent." + note)
+    if policy.panel_confirm and not tainted:
+        return ("Pending the user's confirmation: nobody can hear JARVIS "
+                "speak right now, so nothing was said aloud. The proposal is "
+                "waiting to be confirmed or rejected on the control panel "
+                "instead. NOTHING has been sent. Say nothing more and end "
+                "your turn; never say it was sent." + note)
+    bridge_state.take(proposal.id)
+    return ("Nobody can hear JARVIS right now, so nothing was asked and "
+            "nothing was sent. Tell the user.")
+
+
+TOOL_HANDLERS["whatsapp_propose"] = tool_whatsapp_propose
+ACTING_TOOLS.add("whatsapp_propose")
+
+
+async def _whatsapp_decide(pid: str, accept: bool, *, via: str) -> str:
+    """The user's yes or no to a pending WhatsApp message. The only place one
+    is sent. Returns the sentence JARVIS says. `via` is "voice" or "panel"."""
+    pending = bridge_state.proposals.get(pid)
+    if pending is None or pending.kind != "whatsapp":
+        return i18n.t("That request is no longer pending, sir.")
+    payload = pending.payload or {}
+    raw_contact = str(payload.get("contact", ""))
+    raw_text = str(payload.get("text", ""))
+    tainted = bool(payload.get("tainted"))
+
+    def log_raw(result: str) -> None:
+        whatsapp_actions.audit(None, confirmed_by=via, result=result, contact=raw_contact,
+                               chars=len(raw_text), tainted=tainted)
+
+    try:
+        policy = whatsapp_actions.load_policy()
+    except whatsapp_actions.Disabled:
+        policy = None
+    # The panel is one click. After reading other people's messages only the
+    # two spoken words will do, so the panel cannot send those.
+    if accept and via == "panel" and (policy is None or not policy.panel_confirm or tainted):
+        return i18n.t("Confirm that one aloud, sir.")
+    bridge_state.take(pid)
+    if not accept:
+        log_raw("rejected")
+        return i18n.t("Understood, sir. I've done nothing.")
+    if bridge_state.now() - pending.created > WHATSAPP_PROPOSAL_TTL:
+        log_raw("expired")
+        return i18n.t("That request has expired, sir. Ask me again.")
+    try:
+        if policy is None:
+            raise whatsapp_actions.Refused("WhatsApp sending is off")
+        action = whatsapp_actions.check(policy, raw_contact, raw_text, tainted)
+    except whatsapp_actions.Refused:
+        log_raw("refused: the policy changed")
+        return i18n.t("I can't do that any more, sir. The list of allowed actions has changed.")
+    if not whatsapp_limits.may_act(policy.max_per_minute):
+        whatsapp_actions.audit(action, confirmed_by=via, result="refused: too many per minute")
+        return i18n.t("Too many actions in a minute, sir. I'll wait.")
+    if not whatsapp_actions.audit_ready():
+        return i18n.t("I can't keep a record of it, sir, so I'll not do it.")
+    outcome = await asyncio.to_thread(whatsapp_actions.perform, action)
+    whatsapp_actions.audit(action, confirmed_by=via, result=outcome.code)
+    if outcome.ok:
+        if outcome.code == "dryrun":
+            return i18n.t("Dry run, sir: nothing was touched.")
+        return i18n.t("Done, sir.")
+    if outcome.code == "unreachable":
+        return i18n.t("I couldn't reach WhatsApp, sir.")
+    if outcome.code.startswith(("http_", "redirect")):
+        return i18n.t("WhatsApp refused it, sir.")
+    return i18n.t("I couldn't do that, sir: the WhatsApp connection is not set up properly.")
+
+
+@app.post("/api/whatsapp/{pid}/{decision}")
+async def whatsapp_decision(pid: str, decision: str):
+    """The panel's yes or no. `confirm` only works if the user's policy says
+    `"panel_confirm": true` (and never for a message proposed after reading
+    other people's messages); `reject` always works."""
+    if decision not in ("confirm", "reject"):
+        return JSONResponse(status_code=404, content={"error": i18n.t("Not found")})
+    pending = bridge_state.proposals.get(pid)
+    if pending is None or pending.kind != "whatsapp":
+        return JSONResponse(status_code=404, content={"error": i18n.t("Not found")})
+    return {"ok": True, "text": await _whatsapp_decide(pid, decision == "confirm", via="panel")}
 
 
 # --- spoken alerts (ha_watch.py): opt-in, read only, never urgent but the alarm

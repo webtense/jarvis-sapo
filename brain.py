@@ -76,6 +76,7 @@ ALLOWED_TOOLS = [
     "mcp__jarvis__write_journal",
     "mcp__jarvis__home_propose",
     "mcp__jarvis__google_propose",
+    "mcp__jarvis__whatsapp_propose",
     # The CLI's own two, and the only non-JARVIS tools here. JARVIS could read
     # a page he was handed the address of and nothing else — "look it up" had
     # no answer at all. Both were verified inside this exact flag set
@@ -535,6 +536,15 @@ class Brain:
             if source:
                 return source
         return "a web page" if t.web_content else None
+
+    @property
+    def turn_tool_names(self) -> list[str]:
+        """The names of the tools the brain has called in the turn in flight,
+        as the CLI reported them (`mcp__<server>__<tool>`); empty between
+        turns. The WhatsApp proposal reads it to know whether this very turn
+        read other people's messages."""
+        t = self._inflight
+        return list(t.tools) if t is not None else []
 
     @property
     def turn_is_tainted(self) -> bool:

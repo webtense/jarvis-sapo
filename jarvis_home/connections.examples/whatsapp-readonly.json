@@ -1,0 +1,12 @@
+{
+  "//": "EJEMPLO NO ACTIVO. Para usarlo, copia la entrada de 'mcpServers' dentro de data/jarvis/connections.json (NO este fichero) y cambia las rutas. Las credenciales NO van aqui: guardalas en un fichero JSON 600 FUERA del repo con {url, instance, apikey} (la instancia personal y su propio token, nunca la clave global del servidor) y apunta EVOLUTION_TOKEN_FILE a el. Solo lectura de tu WhatsApp PERSONAL; los grupos quedan excluidos salvo los que permitas por JID en data/jarvis/whatsapp-actions.json. Ver docs/whatsapp.md.",
+  "mcpServers": {
+    "whatsapp": {
+      "command": "python3",
+      "args": ["/RUTA/ABSOLUTA/A/jarvis/whatsapp_readonly_mcp.py"],
+      "env": {
+        "EVOLUTION_TOKEN_FILE": "/RUTA/ABSOLUTA/FUERA/DEL/REPO/.config/jarvis/evolution_personal.json"
+      }
+    }
+  }
+}

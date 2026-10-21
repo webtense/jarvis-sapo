@@ -472,4 +472,7 @@ class Bridge:
             # /api/google/*, never offered as something to "save" as a memory.
             "google": [{"id": p.id, "text": p.fact, "age": int(now - p.created)}
                       for p in self.proposals.values() if p.kind == "google"],
+            # And for a WhatsApp message: decided on /api/whatsapp/*.
+            "whatsapp": [{"id": p.id, "text": p.fact, "age": int(now - p.created)}
+                         for p in self.proposals.values() if p.kind == "whatsapp"],
         }
