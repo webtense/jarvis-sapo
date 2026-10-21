@@ -11,6 +11,7 @@ Versionado semántico con prefijo `ubuntu-`. Uso personal y no comercial, igual 
 - **Escritorio**: lanzador de GNOME (`scripts/install-launcher.sh`, `scripts/jarvis-app`, autoarranque opcional). Ver `docs/escritorio.md`.
 - **Pruebas E2E en CI** (job `e2e`, Ubuntu): Chromium con audio de fichero a través de AudioWorklet y `/ws/mic`, Firefox eligiendo el micrófono local, y la interfaz en castellano.
 - **Calidad de la traducción**: nombres de ficheros y proyectos ya no se traducen por error, tratamiento señor/señora según preferencia, plurales y concordancia, frases de errores web y del puente, punto de Fish neutro en Ajustes, `dist` del frontend robusto en los tests.
+- **Arreglo del micrófono del navegador**: si el reconocimiento de Chrome no podía abrir el micrófono, entraba en un bucle de reinicios (medido en vivo: ~380 por segundo, 441.706 líneas de registro en una hora). Ahora hay a lo sumo un motor arrancando o escuchando, un único reinicio pendiente con espera creciente (hasta 15 s) y aviso tras 3 muertes seguidas; el servidor resume los eventos repetidos del micrófono en vez de registrarlos todos. Prueba E2E en la CI.
 - Conocido y pendiente: la interfaz del panel para confirmar acciones de la casa (hoy solo por voz o API); voz real en Firefox, barge-in y palabra "Jarvis" sin probar con micrófono real; BTR/ACI sin conectar; `server.py` sin partir.
 
 ## ubuntu-0.6.0 — todo en castellano, Firefox y Chrome
