@@ -1,0 +1,12 @@
+{
+  "//": "EJEMPLO NO ACTIVO. Para usarlo, copia la entrada de 'mcpServers' dentro de data/jarvis/connections.json (NO este fichero), cambia la ruta. El token NO va aqui ni en el entorno de JARVIS: autoriza primero con scripts/google-auth.py, que lo guarda en un fichero 600 fuera del repo, y apunta GOOGLE_TOKEN_FILE a el. Solo para tu cuenta PERSONAL de Google. Ver docs/google.md.",
+  "mcpServers": {
+    "google": {
+      "command": "python3",
+      "args": ["/RUTA/ABSOLUTA/A/jarvis/google_readonly_mcp.py"],
+      "env": {
+        "GOOGLE_TOKEN_FILE": "/RUTA/ABSOLUTA/FUERA/DEL/REPO/.config/jarvis/google_readonly.json"
+      }
+    }
+  }
+}

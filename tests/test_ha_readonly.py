@@ -251,7 +251,11 @@ SERVER_EXAMPLES = [p for p in EXAMPLES if p.name not in _NOT_SERVERS]
 
 
 def test_the_examples_exist():
-    assert {p.name for p in EXAMPLES} == {"ha-readonly.json", "btr-aci-readonly.json"} | _NOT_SERVERS
+    # google-readonly.json (docs/google.md) joined this set on the same day as
+    # the Google read-only connection; it is a third inactive MCP-server
+    # example, not one of the non-server allowlist/alert files above.
+    assert {p.name for p in EXAMPLES} == (
+        {"ha-readonly.json", "btr-aci-readonly.json", "google-readonly.json"} | _NOT_SERVERS)
 
 
 @pytest.mark.parametrize("path", SERVER_EXAMPLES, ids=lambda p: p.name)
