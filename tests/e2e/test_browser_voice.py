@@ -459,3 +459,38 @@ async def test_a_muted_microphone_sends_no_audio_to_the_server(start_jarvis):
             await wait_for(lambda: jarvis.events("turn"), "a turn after unmuting")
         finally:
             await browser.close()
+
+
+async def test_a_page_without_a_microphone_does_not_take_the_socket_from_one_with(start_jarvis):
+    """Una página cuyo micrófono está denegado abría /ws/mic antes de pedirlo y
+    le quitaba el único hueco a la página que sí lo tenía: la buena quedaba
+    sorda y la mala no oía nada. Ahora el socket se abre solo con micrófono."""
+    from playwright.async_api import async_playwright
+
+    jarvis = start_jarvis("es", "local")
+    closed_good: list[int] = []
+    bad_sockets: list[str] = []
+    async with async_playwright() as pw:
+        good_browser = await pw.chromium.launch(headless=True, channel="chromium", args=CHROMIUM_ARGS)
+        # Sin --use-fake-ui-for-media-stream: nadie concede el permiso.
+        bad_browser = await pw.chromium.launch(headless=True, channel="chromium",
+                                               args=["--autoplay-policy=no-user-gesture-required"])
+        try:
+            good = await (await good_browser.new_context(permissions=["microphone"])).new_page()
+            tap = SocketTap(good)
+            await tap.install()
+            good.on("websocket", lambda ws: ws.url.endswith("/ws/mic") and
+                    ws.on("close", lambda *_: closed_good.append(1)))
+            await good.goto(jarvis.base + "/")
+            await wait_for(lambda: tap.mic("ready"), "the good page's 'ready'", tap)
+
+            bad = await (await bad_browser.new_context(permissions=[])).new_page()
+            bad.on("websocket", lambda ws: bad_sockets.append(ws.url) if ws.url.endswith("/ws/mic") else None)
+            await bad.goto(jarvis.base + "/")
+            await asyncio.sleep(8)
+
+            assert bad_sockets == [], "a page with no microphone opened /ws/mic"
+            assert closed_good == [], "the page with the microphone lost its socket"
+        finally:
+            await good_browser.close()
+            await bad_browser.close()

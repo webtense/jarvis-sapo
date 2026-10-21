@@ -141,8 +141,8 @@ export function createLocalMic(h: LocalMicHandlers): LocalMic {
     ws.send(buf);
   }
 
-  async function startCapture() {
-    if (capturing) return;
+  async function startCapture(): Promise<boolean> {
+    if (capturing) return stream !== null;
     capturing = true;
     const mine = generation;
     // Held in locals until the last check passes, so a capture that lost the
@@ -166,7 +166,7 @@ export function createLocalMic(h: LocalMicHandlers): LocalMic {
       } finally {
         URL.revokeObjectURL(url);
       }
-      if (mine !== generation) { abandon(); return; }
+      if (mine !== generation) { abandon(); return false; }
       const source = myCtx.createMediaStreamSource(myStream);
       const tap = new AudioWorkletNode(myCtx, "jarvis-pcm-tap");
       tap.port.onmessage = (e: MessageEvent) => sendFrame(e.data as ArrayBuffer);
@@ -180,6 +180,7 @@ export function createLocalMic(h: LocalMicHandlers): LocalMic {
       stream = myStream;
       ctx = myCtx;
       h.onEvent(`local mic: capturing at ${myCtx.sampleRate} Hz, sending ${TARGET_RATE} Hz`);
+      return true;
     } catch (e) {
       abandon();
       if (mine === generation) capturing = false;
@@ -188,6 +189,7 @@ export function createLocalMic(h: LocalMicHandlers): LocalMic {
         ? t("Microphone blocked — check this origin's mic permission.")
         : t("Could not open the microphone."));
       h.onEvent(`local mic: capture failed: ${name}`);
+      return false;
     }
   }
 
@@ -205,8 +207,13 @@ export function createLocalMic(h: LocalMicHandlers): LocalMic {
     start() {
       wanted = true;
       paused = false;
-      connect();
-      void startCapture();
+      const mine = generation;
+      // The socket is opened only once there is a microphone to send. A page
+      // that cannot get one (permission denied, no device) used to connect
+      // first and take the single microphone slot away from a page that works.
+      void startCapture().then((live) => {
+        if (live && wanted && mine === generation) connect();
+      });
     },
     stop() {
       generation++;
