@@ -79,6 +79,19 @@ export function tp(n: number, one: string, other: string, vars: Vars = {}): stri
   return t(n === 1 ? one : other, { n, ...vars });
 }
 
+/**
+ * Como `t()`, pero con la forma del singular cuando n es 1. Es para textos
+ * cuyo inglés no cambia con el número ("{n} active": "1 active") y cuyo
+ * castellano sí ("1 activo", "3 activos"). La forma del singular es la
+ * entrada del catálogo con contexto "one" (`one\u0004texto`); si no existe,
+ * vale la general. En inglés es siempre el propio texto: ni un byte cambia.
+ */
+export function t1(n: number, text: string, vars?: Vars): string {
+  if (CURRENT !== "es" || n !== 1) return t(text, vars);
+  const template = ES[`one\u0004${text}`] ?? ES[text] ?? text;
+  return vars ? fill(template, vars) : template;
+}
+
 // ── Números, fechas y duraciones ────────────────────────────────────────────
 
 /**

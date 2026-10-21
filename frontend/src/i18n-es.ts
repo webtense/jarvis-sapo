@@ -193,17 +193,18 @@ export const ES: Record<string, string> = {
   "equally live": "igual de activa",
   "{count} agent": "{count} agente",
   "{count} agents": "{count} agentes",
-  "no steer": "no dirigible",
+  "no steer": "no admite mensajes",
   "no stamp": "sin marca de tiempo",
   "(unknown)": "(desconocido)",
   "Nothing but fresh sessions.": "Solo hay sesiones nuevas.",
   "{n} fresh (never prompted)": "{n} nuevas (sin instrucciones)",
+  "one\u0004{n} fresh (never prompted)": "{n} nueva (sin instrucciones)",
   "No reason recorded — that is the last thing it said.": "No consta el motivo; esto es lo último que dijo.",
   "It has stopped and has not said why.": "Se ha detenido y no ha dicho por qué.",
   "your keystroke": "su pulsación",
   "JARVIS cannot answer this one — it wants a key pressed in that terminal.":
-    "JARVIS no puede responder a esta: pide una tecla pulsada en esa terminal.",
-  "steerable": "dirigible",
+    "JARVIS no puede responder a esta: necesita que pulse una tecla en esa terminal.",
+  "steerable": "admite mensajes",
   "JARVIS can reply to this one over its inbox socket.": "JARVIS puede responder a esta por su buzón.",
   "no inbox socket": "sin buzón",
   "Nothing can reach this one but the terminal it is in.": "Solo se puede llegar a esta desde su propia terminal.",
@@ -218,7 +219,9 @@ export const ES: Record<string, string> = {
   "Under It": "A su cargo",
   "No subagent transcripts under this conversation.": "Esta conversación no tiene transcripciones de subagentes.",
   "{n} active": "{n} activos",
+  "one\u0004{n} active": "{n} activo",
   "{n} dispatched": "{n} lanzados",
+  "one\u0004{n} dispatched": "{n} lanzado",
   "\"Active\" means a transcript written in the last {seconds} seconds. It is a file age, not a live process — there is no process here to check.":
     "«Activo» significa que su transcripción se escribió en los últimos {seconds} segundos. Es la antigüedad de un archivo, no un proceso vivo: aquí no hay ningún proceso que comprobar.",
   "Both counts hit the watcher's cap of {files} files, so both are floors, not totals — the cap is taken in file-name order, which has nothing to do with which agents are busy.":
@@ -250,7 +253,7 @@ export const ES: Record<string, string> = {
   "Session id": "Id de sesión",
   "Process": "Proceso",
   "Processes": "Procesos",
-  "steered through {pid}": "dirigida a través de {pid}",
+  "steered through {pid}": "mensajes por el proceso {pid}",
   "Close (Esc)": "Cerrar (Esc)",
   "(unknown project)": "(proyecto desconocido)",
   "At a Glance": "De un vistazo",
@@ -367,7 +370,7 @@ export const ES: Record<string, string> = {
     "Última medición {age}. Una ventana de cinco horas puede avanzar mucho en ese tiempo.",
   "Measured {age}.": "Medido {age}.",
   " and ": " y ",
-  "What the CLI reports": "Lo que informa la CLI",
+  "What the CLI reports": "Lo que indica la CLI",
   "No windows at all have been named yet.": "Aún no se ha nombrado ninguna ventana.",
   "{windows}: {named}. There is no separate per-model window — no Fable limit, no Opus limit — in the rate-limit payload. What each model costs is under By Model below, measured from the transcripts.":
     "{windows}: {named}. En los datos de límites no hay una ventana aparte por modelo: ni límite de Fable ni de Opus. Lo que cuesta cada modelo está abajo, en Por modelo, medido a partir de las transcripciones.",
@@ -405,8 +408,12 @@ export const ES: Record<string, string> = {
     "De mayor a menor. El gasto de cada conversación y el de sus subagentes se suman aquí y se separan en las columnas.",
   "{n} smaller conversations not listed. The totals above count every one of them.":
     "{n} conversaciones menores sin listar. Los totales de arriba las cuentan todas.",
+  "one\u0004{n} smaller conversations not listed. The totals above count every one of them.":
+    "{n} conversación menor sin listar. Los totales de arriba la cuentan.",
   "{n} other conversations not listed. The totals above count every one of them.":
     "{n} conversaciones más sin listar. Los totales de arriba las cuentan todas.",
+  "one\u0004{n} other conversations not listed. The totals above count every one of them.":
+    "{n} conversación más sin listar. Los totales de arriba la cuentan.",
   "\"Active\" here means a subagent's transcript was written in the last {window} seconds. That is a file's age, not a live process — there is no process to ask. A subagent that finished a minute ago has already dropped off this list. The name and type come from the sidecar the CLI writes at spawn; an agent without one shows the brief it was given instead, and no type at all rather than a guessed one.":
     "«Activo» significa aquí que la transcripción de un subagente se escribió en los últimos {window} segundos. Es la antigüedad de un archivo, no un proceso vivo: no hay proceso al que preguntar. Un subagente que terminó hace un minuto ya no aparece en esta lista. El nombre y el tipo salen del archivo auxiliar que la CLI escribe al lanzarlo; si un agente no lo tiene, se muestra el encargo que recibió y ningún tipo, antes que uno inventado.",
   "Nothing dispatched in the last {window} seconds.": "No se ha lanzado nada en los últimos {window} segundos.",

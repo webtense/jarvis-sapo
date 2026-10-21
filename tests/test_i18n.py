@@ -37,7 +37,8 @@ def _sample(template: str) -> str:
     ones that must translate get a phrase the catalogue knows)."""
     known = {"approval": "It's not approved yet", "head": "Two of three tasks done",
              "clause": "Two of three tasks done", "rest": "Nothing is running.",
-             "said": "Return", "wrap": "<wrap>"}
+             "said": "Return", "wrap": "<wrap>", "reason": "waiting on input",
+             "problem": "that page wouldn't load"}
 
     def fill(m):
         return known.get(m.group(1), "x" + m.group(1))
@@ -89,8 +90,11 @@ def test_a_sentence_of_ours_nested_in_another_is_translated_too(es):
                    "chitauri finished hace unos 5 minutos, sir, and it worked.")
             == "Terminó antes de que pudiera detenerlo, señor. El trabajo en "
                "chitauri terminó hace unos 5 minutos, señor, y funcionó.")
+    # "your browser" is translated where actions.py picks it (it is a fallback
+    # of ours, not a name), so by the time the frame is translated it is
+    # already Spanish and is copied.
     assert i18n.t("your browser") == "su navegador"
-    assert (i18n.t("Pulled that up in your browser, sir.")
+    assert (i18n.t("Pulled that up in su navegador, sir.")
             == "Lo he abierto en su navegador, señor.")
 
 
@@ -427,3 +431,313 @@ def test_a_long_text_is_content_not_a_phrase_and_is_left_alone(monkeypatch):
 def test_the_limit_does_not_touch_ordinary_phrases(monkeypatch):
     monkeypatch.setenv("JARVIS_LANGUAGE", "es")
     assert i18n.t("Terminal's open in jarvis, sir.") != "Terminal's open in jarvis, sir."
+
+
+# --- v0.7: quality of the translation -----------------------------------------
+
+def test_a_name_that_reads_like_a_catalogue_entry_is_copied_not_translated(es):
+    """A file, folder, project or app called "later", "nothing" or "Return" is
+    somebody's name. Only the sentence around it is ours."""
+    for word in ("later", "nothing", "Return", "your browser", "that file"):
+        assert i18n.t(f"Opened {word} from chitauri, sir.") == f"He abierto {word} de chitauri, señor."
+        assert i18n.t(f"There's no {word} in chitauri, sir — I've opened nothing.") \
+            == f"No existe {word} en chitauri, señor; no he abierto nada."
+        assert i18n.t(f"There's nothing to open in {word}, sir — no index.html in it.") \
+            == f"No hay nada que abrir en {word}, señor: no tiene index.html."
+        assert i18n.t(f"{word} is a folder, sir — ask me for an overview of chitauri, or search it.") \
+            == f"{word} es una carpeta, señor; pídame un resumen de chitauri o búsquela."
+        assert i18n.t(f"{word} is empty, sir.") == f"{word} está vacío, señor."
+        assert i18n.t(f"Opened {word} in VS Code, sir.") == f"He abierto {word} en VS Code, señor."
+        assert i18n.t(f"Noted against {word}.") == f"Anotado en {word}."
+        assert i18n.t(f"I can only drive Chrome or Firefox, sir, not {word} — I've opened nothing.") \
+            == f"Solo manejo Chrome o Firefox, señor, no {word}; no he abierto nada."
+        assert i18n.t(f"Pulled that up in {word}, sir.") == f"Lo he abierto en {word}, señor."
+        assert i18n.t(f"{word} ran into a problem, sir.") == f"{word} ha fallado, señor."
+        assert i18n.t(f"Nothing called {word} is connected, sir. What is: {word}. Add one in /x.") \
+            == f"No hay nada llamado {word} conectado, señor. Lo que sí hay: {word}. Añada uno en /x."
+        assert i18n.t(f"Approved and written down, sir — {word}, 4 sections.") \
+            == f"Aprobado y anotado, señor: {word}, 4 secciones."
+
+
+def test_no_catalogue_marker_translates_a_name():
+    """The `:t` markers left in the catalogue are for sentences of ours only."""
+    allowed = {"rest", "approval", "caveat", "said", "problem"}
+    names = []
+    for english, _ in i18n_es.PAIRS:
+        for m in _PLACEHOLDER.finditer(english):
+            if m.group(0).endswith(":t}") and m.group(1) not in allowed:
+                names.append(m.group(0))
+    assert not names, names
+
+
+def test_our_own_fallbacks_are_translated_where_they_are_chosen(wired, es):
+    """`_plain_name` hands back a Spanish fallback when the value is not an
+    ordinary name; a name that is ordinary is returned untouched."""
+    assert wired._plain_name("later", "that file") == "later"
+    assert wired._plain_name("a b!", "that file") == "ese archivo"
+    assert wired._plain_name("a b!", "that folder") == "esa carpeta"
+    assert wired._plain_name("a b!", "such file") == "tal archivo"
+    assert wired._plain_name("a b!", "an unnamed project") == "un proyecto sin nombre"
+    assert wired._plain_name("a b!", "a directory") == "un directorio"
+    assert wired._plain_name("a b!", "that project") == "ese proyecto"
+    assert wired._plain_name("a b!", "That file") == "Ese archivo"
+    assert wired._said_name({"voice_name": "x<y"}, "A session") == "Una conversación"
+    assert wired._said_name({"voice_name": "x<y"}, "one of them") == "una de ellas"
+    assert wired._said_name({"voice_name": "x<y"}) == "esa conversación"
+    assert wired._plain_phrase("a<b", "something I cannot name") == "algo que no sé nombrar"
+    # and a name that merely looks like one of them stays itself
+    assert wired._said_name({"voice_name": "later"}, "A session") == "later"
+
+
+def test_the_fallbacks_are_english_by_default(wired):
+    assert wired._plain_name("a b!", "that file") == "that file"
+    assert wired._said_name({"voice_name": "x<y"}) == "that session"
+    assert wired._plain_phrase("a<b", "something I cannot name") == "something I cannot name"
+
+
+def test_a_stranger_is_not_half_translated(es):
+    assert i18n.t("Something is broken, sir.") == "Something is broken, sir."
+    assert i18n.t("The kettle is on fire, sir — that one needs your own keystroke.") \
+        == "The kettle is on fire, sir — that one needs your own keystroke."
+    assert i18n.t("hammer is waiting on a dialog, sir.") == "hammer está esperando un diálogo, señor."
+    assert i18n.t("hammer is waiting on input, sir — that one needs your own keystroke.") \
+        == "hammer está esperando una respuesta, señor; ese necesita su propia pulsación."
+
+
+@pytest.mark.asyncio
+async def test_the_needs_you_line_is_still_translated_whole(wired, monkeypatch, es):
+    speech = _FakeSpeech()
+    monkeypatch.setattr(wired, "speech", speech)
+
+    async def notify(name, line):
+        pass
+
+    monkeypatch.setattr(wired, "_notify_needs_you", notify)
+    await wired._announce_needs_you({
+        "kind": "needs_you", "at": 1.0,
+        "session": {"session_id": "s", "voice_name": "note taker", "project": "p",
+                    "state": "needs_you", "needs": "dialog open",
+                    "needs_a_human_hand": False, "steerable": True}})
+    assert speech.calls == ["note taker está esperando un diálogo, señor."]
+    speech.calls.clear()
+    await wired._announce_needs_you({
+        "kind": "needs_you", "at": 1.0,
+        "session": {"session_id": "s", "voice_name": "bad<name", "project": "p",
+                    "state": "needs_you", "needs": "dialog open",
+                    "needs_a_human_hand": False, "steerable": True}})
+    assert speech.calls == ["Una conversación está esperando un diálogo, señor."]
+
+
+def test_a_page_error_is_heard_in_spanish(es):
+    for english, spanish in (
+            ("that page wouldn't load", "esa página no ha cargado"),
+            ("that page had no readable text on it", "esa página no tiene texto legible"),
+            ("I couldn't get a picture of that page", "no he podido capturar esa página"),
+            ("that page's picture came out far too large to send",
+             "la captura de esa página ha salido demasiado grande para enviarla")):
+        assert i18n.t(f"No luck there, sir — {english}.") == f"Sin suerte, señor: {spanish}."
+
+
+def test_every_page_error_message_has_a_pair():
+    """`browser.PageError`'s message is spoken: each literal needs its pair."""
+    tree = ast.parse((REPO / "browser.py").read_text(encoding="utf-8"))
+    known = {english for english, _ in i18n_es.PAIRS}
+    seen = []
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and getattr(node.func, "id", "") == "PageError"
+                and node.args and isinstance(node.args[0], ast.Constant)):
+            seen.append(node.args[0].value)
+    assert seen, "no PageError literal found: the scan is broken"
+    assert not [m for m in seen if m not in known], [m for m in seen if m not in known]
+
+
+def test_the_session_steer_refusals_without_sir_are_translated(es):
+    assert (i18n.t("I don't see a session called hammer. Ask me what's running and I'll list them.")
+            == "No veo ninguna conversación llamada hammer. Pregúnteme qué está en marcha y se las enumero.")
+    assert (i18n.t("I don't see a session by that name. Ask me what's running and I'll list them.")
+            == "No veo ninguna conversación con ese nombre. Pregúnteme qué está en marcha y se las enumero.")
+    assert i18n.t("I can't send anything to hammer — it has no inbox socket, so it was "
+                  "started before cross-session messaging or declined to bind one."
+                  ).startswith("No puedo enviar nada a hammer: no tiene buzón")
+
+
+# --- the form of address ------------------------------------------------------
+
+def test_the_default_form_of_address_is_senor(es, monkeypatch):
+    monkeypatch.delenv("HONORIFIC", raising=False)
+    assert i18n.t("Cancelled, sir.") == "Cancelado, señor."
+    monkeypatch.setenv("HONORIFIC", "sir")
+    assert i18n.t("Cancelled, sir.") == "Cancelado, señor."
+
+
+def test_a_ma_am_preference_says_senora(es, monkeypatch):
+    monkeypatch.setenv("HONORIFIC", "ma'am")
+    assert i18n.t("Cancelled, sir.") == "Cancelado, señora."
+    assert i18n.t("Cleared, sir — nothing of that conversation left. Go ahead.") \
+        == "Hecho, señora: no queda nada de esa conversación. Adelante."
+    assert i18n.t("hammer is waiting on a dialog, sir.") == "hammer está esperando un diálogo, señora."
+
+
+def test_no_honorific_drops_it_with_its_comma(es, monkeypatch):
+    monkeypatch.setenv("HONORIFIC", "none")
+    assert i18n.t("Cancelled, sir.") == "Cancelado."
+    assert i18n.t("Which one, sir?") == "¿Cuál?"
+    assert i18n.t("Good evening, sir.") == "Buenas noches."
+    assert i18n.t("Cleared, sir — nothing of that conversation left. Go ahead.") \
+        == "Hecho: no queda nada de esa conversación. Adelante."
+    assert i18n.t("The work in chitauri stopped to ask a question, sir, so nothing was built.") \
+        == "El trabajo en chitauri se detuvo para hacer una pregunta, así que no se construyó nada."
+    assert i18n.t("hammer is waiting on a dialog, sir — that one needs your own keystroke.") \
+        == "hammer está esperando un diálogo; ese necesita su propia pulsación."
+
+
+def test_every_pair_reads_well_without_the_honorific(es, monkeypatch):
+    for value, expected_word in (("none", None), ("ma'am", "señora")):
+        monkeypatch.setenv("HONORIFIC", value)
+        for english, spanish in i18n_es.PAIRS:
+            out = i18n._honorific_es(spanish)
+            assert not re.search(r"\bseñor\b", out), (value, english, out)
+            for bad in (" ,", ",.", ",?", ", .", "  ", ",:", ",;"):
+                assert bad not in out, (value, english, out)
+            if expected_word and ", señor" in spanish:
+                assert expected_word in out
+
+
+def test_a_name_called_senor_is_never_rewritten(es, monkeypatch):
+    monkeypatch.setenv("HONORIFIC", "none")
+    assert i18n.t("Opened señor from chitauri, sir.") == "He abierto señor de chitauri."
+
+
+def test_the_honorific_is_ignored_in_english(monkeypatch):
+    monkeypatch.setenv("JARVIS_LANGUAGE", "en")
+    monkeypatch.setenv("HONORIFIC", "none")
+    sentence = "Cancelled, sir."
+    assert i18n.t(sentence) is sentence
+
+
+# --- numbers and the clock ------------------------------------------------------
+
+def test_one_agrees_with_what_is_counted(wired, es):
+    assert wired._say_number(1) == "una"
+    assert wired._say_number(1, "m") == "un"
+    assert wired._say_number(1, "alone") == "uno"
+    assert wired._say_number(2, "m") == "dos"
+    assert wired._say_number(12, "m") == "12"
+    assert i18n.number_word(1) == "una" and i18n.number_word(1, "m") == "un"
+    assert wired._cap_listing(["a", "b", "c", "d"]) == "a, b y c, y uno más"
+
+
+def test_the_english_numbers_are_unchanged_by_the_gender_argument(wired):
+    assert wired._say_number(1) == "one"
+    assert wired._say_number(1, "m") == "one"
+    assert wired._say_number(1, "alone") == "one"
+    assert wired._cap_listing(["a", "b", "c", "d"]) == "a, b and c, and one other"
+
+
+def test_a_single_task_is_not_counted_as_one_of_one_task(es):
+    assert i18n.t("None of una task done yet") == "La única tarea aún no está hecha"
+    assert i18n.t("Una of una task done") == "La única tarea está hecha"
+    assert i18n.t("None of una task done yet in hammer, sir, though nothing of mine is running it.") \
+        == "La única tarea aún no está hecha en hammer, señor, aunque no hay nada mío ejecutándolo."
+    assert i18n.t("All una tasks done in hammer, sir. Nothing is running.") \
+        .startswith("La única tarea está hecha en hammer, señor.")
+    # more than one keeps the plural frame
+    assert i18n.t("None of tres tasks done yet") == "Ninguna de las tres tareas hecha aún"
+    assert i18n.t("Dos of tres tasks done") == "Dos de tres tareas hechas"
+
+
+def test_the_progress_clause_for_one_task_is_built_in_spanish(wired, es):
+    from types import SimpleNamespace
+    one = SimpleNamespace(done=0, total=1, current=None)
+    assert i18n.t(wired._build_progress_clause(one)) == "La única tarea aún no está hecha"
+    three = SimpleNamespace(done=0, total=3, current=None)
+    assert i18n.t(wired._build_progress_clause(three)) == "Ninguna de las tres tareas hecha aún"
+
+
+def test_the_progress_clause_is_unchanged_in_english(wired):
+    from types import SimpleNamespace
+    assert wired._build_progress_clause(
+        SimpleNamespace(done=0, total=1, current=None)) == "None of one task done yet"
+
+
+def test_midnight_is_said_as_midnight(es):
+    from datetime import datetime
+    assert i18n.reset_clock(datetime(2026, 10, 21, 0, 0), 0) == "medianoche"
+    assert i18n.reset_clock(datetime(2026, 10, 21, 0, 0), 1) == "mañana a medianoche"
+    assert i18n.reset_clock(datetime(2026, 10, 21, 0, 0), 3) == "el miércoles a medianoche"
+    assert i18n.reset_clock(datetime(2026, 10, 21, 0, 30), 0) == "las 0:30"
+    assert i18n.reset_clock(datetime(2026, 10, 21, 12, 0), 0) == "las 12"
+
+
+# --- the rest of the loose ends ---------------------------------------------------
+
+def test_the_spanish_fresh_start_phrase_the_persona_teaches_works(wired, es):
+    assert wired._is_fresh_start("Empezar de cero")
+    assert wired._is_fresh_start("empieza de cero, por favor")
+    assert wired._is_fresh_start("vamos con una nueva conversación")
+    assert wired._is_fresh_start("Borrón y cuenta nueva")
+    assert not wired._is_fresh_start("¿cómo va el proyecto?")
+    # the English phrases still work in Spanish mode
+    assert wired._is_fresh_start("start fresh")
+
+
+def test_the_spanish_fresh_start_is_not_a_thing_in_english(wired):
+    assert not wired._is_fresh_start("empezar de cero")
+    assert wired._is_fresh_start("start fresh") is True
+
+
+def test_the_persona_in_castilian_names_the_same_tools_and_rules():
+    """`jarvis_home/CLAUDE.es.md` must keep every tool and every `code` name of
+    the English persona (and add none): they are the contract with the tools."""
+    en = (REPO / "jarvis_home" / "CLAUDE.md").read_text(encoding="utf-8")
+    es_text = (REPO / "jarvis_home" / "CLAUDE.es.md").read_text(encoding="utf-8")
+    code = lambda text: set(re.findall(r"`([^`]+)`", text))
+    # The one phrase the user SAYS is translated, on purpose (the server
+    # recognises both: `FRESH_START_PHRASES_ES`).
+    assert code(en) - code(es_text) == {"start fresh"}
+    assert code(es_text) - code(en) == set()
+    for spoken in ("empezar de cero",):
+        assert spoken in es_text
+    for loan in ("frontend", "transcript", "tests frente", "prompt "):
+        assert loan not in es_text, loan
+
+
+def test_the_persona_never_calls_a_costly_picture_delicate():
+    es_text = (REPO / "jarvis_home" / "CLAUDE.es.md").read_text(encoding="utf-8")
+    assert "sale cara" in es_text and "algo delicado" not in es_text
+
+
+def test_the_waiting_lines_follow_the_language():
+    import speech
+    assert speech.BRIDGES_ES and speech.UNREAD_PREFIX_ES
+    assert not set(speech.BRIDGES) & set(speech.BRIDGES_ES)
+
+
+@pytest.mark.asyncio
+async def test_a_scheduler_picks_its_resume_phrases_by_language(monkeypatch):
+    import speech
+
+    async def synth(text):
+        return b"A"
+
+    async def emit(msg):
+        pass
+
+    monkeypatch.setenv("JARVIS_LANGUAGE", "es")
+    assert speech.SpeechScheduler(synth, emit).bridges == speech.BRIDGES_ES
+    # a caller's own tuple is respected, whatever the language
+    assert speech.SpeechScheduler(synth, emit, bridges=("x",)).bridges == ("x",)
+    monkeypatch.setenv("JARVIS_LANGUAGE", "en")
+    assert speech.SpeechScheduler(synth, emit).bridges == speech.BRIDGES
+
+
+def test_the_bridge_child_speaks_the_language_of_the_server(monkeypatch):
+    import jarvis_bridge_mcp as child
+    monkeypatch.setenv("JARVIS_LANGUAGE", "es")
+    reply = child.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                          "params": {"name": "nope", "arguments": {}}})
+    assert reply["result"]["content"][0]["text"] == "Herramienta desconocida: nope"
+    monkeypatch.setenv("JARVIS_LANGUAGE", "en")
+    reply = child.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                          "params": {"name": "nope", "arguments": {}}})
+    assert reply["result"]["content"][0]["text"] == "Unknown tool: nope"

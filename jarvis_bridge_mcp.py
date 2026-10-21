@@ -33,10 +33,34 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from jarvis_mcp import _ssl_context_for
 
 PROTOCOL_VERSION = "2024-11-05"
+
+
+def _spanish() -> bool:
+    """Whether this child speaks Spanish: `JARVIS_LANGUAGE`, and failing that
+    the one key of the repo's `.env` (this process is started by another
+    session's `claude`, which does not inherit it). The server's own replies
+    are already Spanish; without this the session reads one language from the
+    server and another from this process, and says both to the user."""
+    raw = os.environ.get("JARVIS_LANGUAGE")
+    if raw is None:
+        try:
+            for line in (Path(__file__).resolve().parent / ".env").read_text(
+                    encoding="utf-8").splitlines():
+                key, _, value = line.partition("=")
+                if key.strip() == "JARVIS_LANGUAGE":
+                    raw = value.strip().strip("\"'")
+        except OSError:
+            pass
+    return (raw or "").strip().lower()[:2] == "es"
+
+
+def _say(english: str, spanish: str) -> str:
+    return spanish if _spanish() else english
 
 # One call that is answered at once: speak, notify, remember.
 TIMEOUT_SEC = 20.0
@@ -184,15 +208,22 @@ def _forward(tool: str, arguments: dict) -> tuple[bool, str]:
             reply = json.loads(resp.read().decode("utf-8", errors="replace"))
     except urllib.error.HTTPError as e:
         if e.code == 401:
-            return False, ("JARVIS rejected the bridge token — run "
-                           "scripts/install-bridge.sh again.")
-        return False, f"JARVIS refused the call ({e.code})."
+            return False, _say(
+                "JARVIS rejected the bridge token — run "
+                "scripts/install-bridge.sh again.",
+                "JARVIS ha rechazado el token del puente: vuelve a ejecutar "
+                "scripts/install-bridge.sh.")
+        return False, _say(f"JARVIS refused the call ({e.code}).",
+                           f"JARVIS ha rechazado la llamada ({e.code}).")
     except (urllib.error.URLError, OSError, TimeoutError):
-        return False, "The JARVIS server is unreachable."
+        return False, _say("The JARVIS server is unreachable.",
+                           "El servidor de JARVIS no responde.")
     except ValueError:
-        return False, "The JARVIS server sent something unreadable."
+        return False, _say("The JARVIS server sent something unreadable.",
+                           "El servidor de JARVIS ha enviado algo ilegible.")
     if not isinstance(reply, dict):
-        return False, "The JARVIS server sent something unreadable."
+        return False, _say("The JARVIS server sent something unreadable.",
+                           "El servidor de JARVIS ha enviado algo ilegible.")
     return bool(reply.get("ok")), str(reply.get("text", ""))
 
 
@@ -230,9 +261,11 @@ def handle(msg: dict) -> dict | None:
         name = params.get("name", "")
         args = params.get("arguments") or {}
         if name not in _ROUTES:
-            reply = _result(rid, False, f"Unknown tool: {name}")
+            reply = _result(rid, False, _say(f"Unknown tool: {name}",
+                                             f"Herramienta desconocida: {name}"))
         elif not isinstance(args, dict):
-            reply = _result(rid, False, "Arguments must be an object.")
+            reply = _result(rid, False, _say("Arguments must be an object.",
+                                             "Los argumentos deben ser un objeto."))
         else:
             ok, text = _forward(name, args)
             reply = _result(rid, ok, text)

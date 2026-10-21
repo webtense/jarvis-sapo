@@ -12,6 +12,7 @@ import re
 import shutil
 
 import host
+import i18n
 
 log = logging.getLogger("jarvis.actions")
 
@@ -181,7 +182,7 @@ async def _open_browser_linux(url: str, browser: str) -> dict:
     binary = next((b for b in map(shutil.which, candidates) if b), None)
     if binary is None:
         binary = shutil.which("xdg-open")
-        app_name = "your browser"
+        app_name = i18n.t("your browser")   # ours, not a name: translated here
     if binary is None:
         return {"success": False,
                 "confirmation": f"{app_name} ran into a problem, sir."}
@@ -310,7 +311,7 @@ async def open_in_editor(path: str) -> dict:
     editor = "VS Code"
     if argv is None:
         argv = ["xdg-open" if host.is_linux() else "open", str(path)]
-        editor = "your editor"
+        editor = i18n.t("your editor")      # ours, not a name: translated here
 
     try:
         proc = await asyncio.create_subprocess_exec(

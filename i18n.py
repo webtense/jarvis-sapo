@@ -41,6 +41,7 @@ frame around them can still be matched whole.
 from __future__ import annotations
 
 import logging
+import os
 import re
 
 import lang
@@ -122,14 +123,55 @@ def _translate(text: str, depth: int) -> str:
     assert _exact is not None and _compiled is not None
     hit = _exact.get(text)
     if hit is not None:
-        return hit
+        return _honorific_es(hit)
     for regex, spanish, kinds in _compiled:
         m = regex.fullmatch(text)
         if m:
-            filled = _fill(spanish, m, kinds, depth)
+            filled = _fill(_honorific_es(spanish), m, kinds, depth)
             if filled is not None:
                 return filled
     return text
+
+
+# ---------------------------------------------------------------------------
+# The form of address ("señor" / "señora" / none)
+# ---------------------------------------------------------------------------
+#
+# The Settings panel stores `HONORIFIC` as `sir` (the default), `ma'am` or
+# `none`. The catalogue is written with "señor"; the preference is applied to
+# the SPANISH TEMPLATE, before any captured text is spliced in, so a project
+# or a file that happens to be called "señor" is never rewritten. English is
+# never touched: with `JARVIS_LANGUAGE=en` this code does not run at all.
+
+_SENOR = re.compile(r"\bseñor\b")
+_COMMA_SENOR = re.compile(r",\s*señor\b")
+_MADAM = frozenset({"ma'am", "ma’am", "maam", "madam", "señora", "senora", "female"})
+_NONE = frozenset({"none", "ninguno", "ninguna", "no", "off"})
+
+
+def honorific() -> str:
+    """`sir`, `madam` or `none`, read from `HONORIFIC` each time (the settings
+    endpoint updates the environment live). Anything unrecognised is `sir`."""
+    raw = os.environ.get("HONORIFIC", "sir").strip().lower()
+    if raw in _MADAM:
+        return "madam"
+    if raw in _NONE:
+        return "none"
+    return "sir"
+
+
+def _honorific_es(spanish: str) -> str:
+    """The Spanish template with "señor" turned into "señora", or dropped
+    together with the comma that introduces it ("Hecho, señor: listo" ->
+    "Hecho: listo"), according to the preference."""
+    if "señor" not in spanish:
+        return spanish
+    mode = honorific()
+    if mode == "sir":
+        return spanish
+    if mode == "madam":
+        return _SENOR.sub("señora", spanish)
+    return re.sub(r" {2,}", " ", _SENOR.sub("", _COMMA_SENOR.sub("", spanish)))
 
 
 # Longest text `t()` will look at; real phrases are far shorter.
@@ -163,12 +205,32 @@ def is_es() -> bool:
     return lang.language() == "es"
 
 
+def pick(english: str, spanish: str) -> str:
+    """One of two words for a fallback that has no single good translation
+    ("that" is "ese nombre" in one sentence and "ese navegador" in another).
+    English, the default, gets its own text back untouched."""
+    return spanish if is_es() else english
+
+
 # Feminine forms ("una") because what gets counted aloud is almost always
-# tareas, conversaciones or ejecuciones.
+# tareas, conversaciones or ejecuciones. Only "one" changes with the gender of
+# what is counted: "un proyecto", "una tarea", and "uno" when nothing follows
+# it ("y uno más").
 NUMBER_WORDS_ES = {
     1: "una", 2: "dos", 3: "tres", 4: "cuatro", 5: "cinco",
     6: "seis", 7: "siete", 8: "ocho", 9: "nueve",
 }
+NUMBER_WORDS_ES_MASC = {**NUMBER_WORDS_ES, 1: "un"}
+NUMBER_WORDS_ES_ALONE = {**NUMBER_WORDS_ES, 1: "uno"}
+
+
+def number_word(n: int, form: str = "f") -> str:
+    """A small count in words: `f` (feminine, the default), `m` (before a
+    masculine noun, "un") or `alone` ("uno"). Ten and over stay numerals."""
+    table = {"m": NUMBER_WORDS_ES_MASC, "alone": NUMBER_WORDS_ES_ALONE}.get(
+        form, NUMBER_WORDS_ES)
+    return table.get(n, str(n))
+
 
 DAYS_ES = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 MONTHS_ES = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
@@ -195,9 +257,12 @@ def reset_clock(when, days_ahead: int) -> str:
     "las 10:30", "mañana a las 10", "el lunes a las 10", "el lunes 8 de
     septiembre a las 10". 24-hour clock, as is usual in Spain."""
     hour = when.hour
-    clock = f"{hour}" if when.minute == 0 else f"{hour}:{when.minute:02d}"
-    article = "la" if hour == 1 else "las"
-    at = f"{article} {clock}"
+    if hour == 0 and when.minute == 0:
+        at = "medianoche"                       # not "las 0"
+    else:
+        clock = f"{hour}" if when.minute == 0 else f"{hour}:{when.minute:02d}"
+        article = "la" if hour == 1 else "las"
+        at = f"{article} {clock}"
     if days_ahead <= 0:
         return at
     if days_ahead == 1:

@@ -24,7 +24,8 @@ WHAT IT COSTS AND WHAT IT NEEDS
 `node` (to run `vite build`, already a dev dependency) and Playwright's
 Chromium, which is already in `.venv` and already used by `browser.py`. No
 new dependency of either kind. The bundle is built ONCE per session and only
-when a source file is newer than it. If either is missing the tests skip
+when a source file is newer than it or it was not built by this module for
+that language (`dist-en` / `dist-es`, never the shipped `dist`). If either is missing the tests skip
 rather than fail: they are a real check on this machine, not a new
 requirement for anyone cloning the repo.
 
@@ -53,13 +54,16 @@ VIEWPORT = {"width": 1400, "height": 900}
 
 REPO = Path(__file__).resolve().parent.parent
 FRONTEND = REPO / "frontend"
-DIST = FRONTEND / "dist"
+DIST = FRONTEND / "dist"       # the shipped build; this module never writes it
 # Language the bundle is compiled for -> VITE_JARVIS_LANG, which is fixed at
 # BUILD time (it is how scripts/start-ubuntu.sh tells the page its language).
 # "en" is the default build: the variable is REMOVED from the environment, so
 # the English bundle is the one that ships when nothing is set.
 LANG_ENV = {"es": "es-ES"}
 BUILD_TIMEOUT_SEC = 300
+# Written next to a bundle this module built, naming the language it was
+# compiled for (see `_stamp_matches`).
+BUNDLE_STAMP = ".jarvis-bundle-lang"
 
 
 def why_unavailable() -> str | None:
@@ -85,25 +89,54 @@ def _newest_source() -> float:
     return newest
 
 
+def _wanted_lang_env(lang: str) -> str:
+    """What `VITE_JARVIS_LANG` must be for this bundle: nothing for English (the
+    default build), `es-ES` for Spanish."""
+    return LANG_ENV.get(lang, "")
+
+
+def _stamp_matches(out: Path, lang: str) -> bool:
+    """Whether `out` was built by THIS module for `lang`. The mtime of the
+    sources says a bundle is fresh, not what language it was compiled for: a
+    `dist` that `scripts/start-ubuntu.sh` built with `VITE_JARVIS_LANG=es-ES`
+    is newer than every source and would have been reused as "English",
+    turning every English assertion into a failure that looks like a regression
+    in the page. The stamp is written only by `build_bundle`."""
+    try:
+        return (out / BUNDLE_STAMP).read_text(encoding="utf-8").strip() == \
+            f"lang={_wanted_lang_env(lang) or 'default'}"
+    except OSError:
+        return False
+
+
 def build_bundle(lang: str = "en") -> Path:
-    """`frontend/dist`, rebuilt only if a source file is newer than it.
+    """The bundle for `lang`, rebuilt unless a bundle THIS module built for
+    that language is newer than every source file.
 
     The same `npm run build` a developer runs — never a bespoke bundling
-    path, or the thing under test stops being the thing that ships. Another
-    language goes to its own `dist-<lang>` folder, so the English bundle the
-    rest of the suite reads is never overwritten by a Spanish one.
+    path, or the thing under test stops being the thing that ships. Every
+    language goes to its own folder (`dist-en`, `dist-es`) and the shipped
+    `frontend/dist` is never touched: the one the service serves may have been
+    compiled for a language this test run knows nothing about, and the
+    English one the rest of the suite reads (`tests/test_clickjacking.py`) is
+    the plain `npm run build` of CI.
     """
-    out = DIST if lang == "en" else FRONTEND / f"dist-{lang}"
+    out = FRONTEND / f"dist-{lang}"
     target = out / "dashboard.html"
-    if not target.is_file() or target.stat().st_mtime < _newest_source():
+    if (not target.is_file() or not _stamp_matches(out, lang)
+            or target.stat().st_mtime < _newest_source()):
+        # Whatever is in the environment, the language of the bundle is the
+        # one asked for: removed for English, set for the others.
         env = {k: v for k, v in os.environ.items() if k != "VITE_JARVIS_LANG"}
-        cmd = ["npm", "run", "build"]
-        if lang != "en":
-            env["VITE_JARVIS_LANG"] = LANG_ENV[lang]
-            cmd += ["--", "--outDir", out.name, "--emptyOutDir"]
-        subprocess.run(cmd, cwd=FRONTEND, check=True, env=env,
+        if _wanted_lang_env(lang):
+            env["VITE_JARVIS_LANG"] = _wanted_lang_env(lang)
+        subprocess.run(["npm", "run", "build", "--", "--outDir", out.name,
+                        "--emptyOutDir"],
+                       cwd=FRONTEND, check=True, env=env,
                        capture_output=True, text=True,
                        timeout=BUILD_TIMEOUT_SEC)
+        (out / BUNDLE_STAMP).write_text(
+            f"lang={_wanted_lang_env(lang) or 'default'}\n", encoding="utf-8")
     return out
 
 

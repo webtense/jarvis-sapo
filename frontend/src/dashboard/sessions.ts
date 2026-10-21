@@ -30,7 +30,7 @@ import {
   listSessions, getUsageSessions,
   type SessionRow, type SessionUsage, type AgentUsage,
 } from "./api";
-import { t, tp, loc, unit, ago, fmtFixed } from "../i18n";
+import { t, t1, tp, loc, unit, ago, fmtFixed } from "../i18n";
 import { connectSessionsLive } from "./sessions-live";
 import {
   el, row, panel, group, stack, kv, button, callout, splitView,
@@ -282,7 +282,7 @@ function projectGroup(project: string, rows: SessionRow[]): HTMLElement {
 
   if (fresh.length > 0) {
     const details = el("details", "fresh-group");
-    const summary = el("summary", undefined, t("{n} fresh (never prompted)", { n: fresh.length }));
+    const summary = el("summary", undefined, t1(fresh.length, "{n} fresh (never prompted)", { n: fresh.length }));
     details.append(summary);
     details.open = freshOpen.has(project);
     details.addEventListener("toggle", () => {
@@ -447,8 +447,10 @@ function agentsPanel(s: SessionRow): HTMLElement {
   const line = el("div", "sd-block");
   const pills = el("div", "sd-pills");
   pills.append(
-    pill(t("{n} active", { n: agentsActive(s) }), s.agents_active > 0 ? "accent" : "idle"),
-    pill(t("{n} dispatched", { n: seen }), "idle", "ghost"),
+    pill(t1(s.agents_capped ? 2 : s.agents_active, "{n} active", { n: agentsActive(s) }),
+         s.agents_active > 0 ? "accent" : "idle"),
+    pill(t1(s.agents_capped ? 2 : s.agents_seen, "{n} dispatched", { n: seen }),
+         "idle", "ghost"),
   );
   line.append(pills, el("div", "sd-agent-note",
     t("\"Active\" means a transcript written in the last {seconds} seconds. "
