@@ -98,6 +98,8 @@ PAIRS: list[tuple[str, str]] = [
      "queda una clave de API de Anthropic en el entorno"),
     ("cross-session steering isn't enabled",
      "el envío de mensajes entre sesiones no está activado"),
+    ("house actions use the read token, by your decision",
+     "las acciones de la casa usan el token de lectura, por decisión tuya"),
 
     # --- small fragments the server's own helpers build ----------------------
     ("just now", "ahora mismo"),

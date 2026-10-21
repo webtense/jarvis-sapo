@@ -70,7 +70,8 @@ def house(monkeypatch, tmp_path):
     """An isolated data dir, a clean environment and a recording network."""
     monkeypatch.setenv("JARVIS_DATA_DIR", str(tmp_path / "data"))
     for name in ("HA_URL", "HA_TOKEN", "HA_TOKEN_FILE", "HA_ACTIONS_URL",
-                 "HA_ACTIONS_TOKEN_FILE", "HA_ACTIONS_TOKEN", "JARVIS_HOME_DRYRUN"):
+                 "HA_ACTIONS_TOKEN_FILE", "HA_ACTIONS_TOKEN", "JARVIS_HOME_DRYRUN",
+                 "HA_ACTIONS_ALLOW_READ_TOKEN"):
         monkeypatch.delenv(name, raising=False)
 
     calls = []
@@ -572,6 +573,114 @@ def test_two_different_tokens_work(house, monkeypatch):
     monkeypatch.setenv("HA_TOKEN_FILE", str(house.token_file("read_token", READ_TOKEN)))
     assert ha.perform(_action(house)).ok
     assert house.calls[0].get_header("Authorization") == f"Bearer {ACT_TOKEN}"
+
+
+# --- the user's opt-in: the read token may also act ---------------------------------
+
+def _read_setup(house, monkeypatch):
+    monkeypatch.setenv("HA_URL", "http://ha.invalid:8123")
+    path = house.token_file("read_token", READ_TOKEN)
+    monkeypatch.setenv("HA_TOKEN_FILE", str(path))
+    return path
+
+
+def test_with_the_opt_in_the_same_token_is_accepted(house, monkeypatch):
+    read = _read_setup(house, monkeypatch)
+    monkeypatch.setenv("HA_ACTIONS_ALLOW_READ_TOKEN", "1")
+    # same value in another file
+    monkeypatch.setenv("HA_ACTIONS_TOKEN_FILE", str(house.token_file("a", READ_TOKEN)))
+    assert ha.perform(_action(house)).ok
+    # same file
+    monkeypatch.setenv("HA_ACTIONS_TOKEN_FILE", str(read))
+    assert ha.perform(_action(house)).ok
+    # same value as the inline read token
+    monkeypatch.delenv("HA_TOKEN_FILE")
+    monkeypatch.setenv("HA_TOKEN", READ_TOKEN)
+    monkeypatch.setenv("HA_ACTIONS_TOKEN_FILE", str(house.token_file("b", READ_TOKEN)))
+    assert ha.perform(_action(house)).ok
+    assert [c.get_header("Authorization") for c in house.calls] == [f"Bearer {READ_TOKEN}"] * 3
+
+
+def test_with_the_opt_in_the_read_token_is_the_fallback_when_no_actions_file(house, monkeypatch):
+    _read_setup(house, monkeypatch)
+    monkeypatch.setenv("HA_ACTIONS_ALLOW_READ_TOKEN", "1")
+    assert ha.read_token_in_use() is True
+    assert ha.perform(_action(house)).ok
+    assert house.calls[0].get_header("Authorization") == f"Bearer {READ_TOKEN}"
+
+
+def test_without_the_opt_in_nothing_changes(house, monkeypatch):
+    read = _read_setup(house, monkeypatch)
+    # no actions file: no fallback
+    out = ha.perform(_action(house))
+    assert not out.ok and out.code.startswith("config")
+    # same token: refused
+    monkeypatch.setenv("HA_ACTIONS_TOKEN_FILE", str(read))
+    out = ha.perform(_action(house))
+    assert not out.ok and READ_TOKEN not in out.code
+    assert house.calls == [] and ha.read_token_in_use() is False
+
+
+@pytest.mark.parametrize("value", ["", "0", "true", "yes", "on", "11", "TRUE", "2", " no "])
+def test_only_the_value_1_turns_the_opt_in_on(house, monkeypatch, value):
+    read = _read_setup(house, monkeypatch)
+    monkeypatch.setenv("HA_ACTIONS_ALLOW_READ_TOKEN", value)
+    assert ha.allow_read_token() is False
+    assert not ha.perform(_action(house)).ok            # fallback: no actions file
+    monkeypatch.setenv("HA_ACTIONS_TOKEN_FILE", str(read))
+    assert not ha.perform(_action(house)).ok            # same token
+    assert house.calls == [] and ha.read_token_in_use() is False
+
+
+def test_the_opt_in_keeps_every_file_check(house, monkeypatch):
+    read = _read_setup(house, monkeypatch)
+    monkeypatch.setenv("HA_ACTIONS_ALLOW_READ_TOKEN", "1")
+    for mode in (0o644, 0o640, 0o666):
+        read.chmod(mode)
+        out = ha.perform(_action(house))                # the fallback reads the read file
+        assert not out.ok and "chmod 600" in out.code
+        assert READ_TOKEN not in out.code and str(house.tmp) not in out.code
+    assert house.calls == [] and ha.read_token_in_use() is False
+    read.chmod(0o600)
+    monkeypatch.setenv("HA_ACTIONS_TOKEN_FILE", str(house.tmp / "nope"))
+    assert not ha.perform(_action(house)).ok            # a missing explicit file does not fall back
+    monkeypatch.setenv("HA_ACTIONS_TOKEN_FILE", str(house.token_file("empty", "")))
+    assert not ha.perform(_action(house)).ok
+    assert house.calls == []
+
+
+def test_with_the_opt_in_a_separate_token_is_still_used_and_no_warning(house, monkeypatch):
+    house.configure()
+    monkeypatch.setenv("HA_TOKEN_FILE", str(house.token_file("read_token", READ_TOKEN)))
+    monkeypatch.setenv("HA_ACTIONS_ALLOW_READ_TOKEN", "1")
+    assert ha.read_token_in_use() is False
+    assert ha.perform(_action(house)).ok
+    assert house.calls[0].get_header("Authorization") == f"Bearer {ACT_TOKEN}"
+
+
+def test_the_opt_in_variable_is_removed_from_runs_and_the_brain():
+    import claude_env
+    base = {"PATH": "/usr/bin", "HA_ACTIONS_ALLOW_READ_TOKEN": "1"}
+    assert "HA_ACTIONS_ALLOW_READ_TOKEN" in claude_env.RUN_SCRUBBED_ENV_KEYS
+    assert "HA_ACTIONS_ALLOW_READ_TOKEN" not in claude_env.run_env(base)
+    assert "HA_ACTIONS_ALLOW_READ_TOKEN" not in claude_env.child_env(base)
+
+
+def test_preflight_warns_once_without_path_or_value(house, monkeypatch):
+    import preflight
+    read = _read_setup(house, monkeypatch)
+    quiet = preflight._check_home_actions_read_token_sync()
+    assert quiet.status == preflight.STATUS_OK
+    monkeypatch.setenv("HA_ACTIONS_ALLOW_READ_TOKEN", "1")
+    check = preflight._check_home_actions_read_token_sync()
+    assert check.status == preflight.STATUS_WARN
+    shown = " ".join([check.message, check.remedy or "", preflight._phrase_for(check)])
+    for secret in (READ_TOKEN, str(read), str(house.tmp), "read_token"):
+        assert secret not in shown
+    assert "READ token" in check.message
+    # a separate token: nothing to warn about
+    house.configure()
+    assert preflight._check_home_actions_read_token_sync().status == preflight.STATUS_OK
 
 
 def test_the_address_may_fall_back_to_ha_url_but_must_be_plain(house, monkeypatch):

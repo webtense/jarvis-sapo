@@ -34,7 +34,7 @@ SCRUBBED_ENV_KEYS = {"CLAUDECODE"}
 # environment (that is how an MCP server it launches gets configured), so this
 # list applies to runs only, not to child_env().
 RUN_SCRUBBED_ENV_KEYS = {"HA_URL", "HA_TOKEN", "HA_TOKEN_FILE", "BTR_ACI_BASIC_AUTH",
-                         "GOOGLE_TOKEN_FILE"}
+                         "GOOGLE_TOKEN_FILE", "HA_ACTIONS_ALLOW_READ_TOKEN"}
 
 # The credential that CAN act on the house (docs/casa-control.md). Unlike the
 # read-only ones above it is used by the JARVIS server process itself, after

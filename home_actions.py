@@ -19,7 +19,9 @@ What this module guarantees, and `tests/test_home_actions.py` pins:
     Redirects are never followed (urllib would resend the Authorization header
     to whatever host the 3xx names) and no proxy is used.
   * Its own token (`HA_ACTIONS_TOKEN_FILE`, a 0600 file). It is never the read
-    token: if both files hold the same value, nothing is sent.
+    token: if both files hold the same value, nothing is sent. The one
+    exception is the user's explicit opt-in `HA_ACTIONS_ALLOW_READ_TOKEN=1`
+    (see `allow_read_token`), which preflight and the startup log announce.
   * The user decides, not a model: this module only describes and performs an
     `Action`. The proposal, the spoken question and the "yes" live in
     `server.py` and `bridge.py`, and nothing in here is reachable from a tool
@@ -450,13 +452,46 @@ def _read_secret_file(path: str, label: str) -> str:
         raise HomeError(f"{label} cannot be read.") from None
 
 
+def allow_read_token() -> bool:
+    """The user's explicit, opt-in decision to let the READ token also act
+    (docs/casa-control.md). Only the exact value "1": "true", "yes" or an empty
+    string do not count, so it cannot be switched on by accident."""
+    return os.environ.get("HA_ACTIONS_ALLOW_READ_TOKEN", "").strip() == "1"
+
+
+def _actions_token_source() -> tuple[str, str, bool]:
+    """(path, label, falls_back_to_read) of the file holding the action token.
+    Without HA_ACTIONS_TOKEN_FILE, and ONLY with the opt-in, the read token's
+    file stands in for it."""
+    token_file = os.environ.get("HA_ACTIONS_TOKEN_FILE", "").strip()
+    if token_file:
+        return token_file, "HA_ACTIONS_TOKEN_FILE", False
+    if allow_read_token():
+        read_file = os.environ.get("HA_TOKEN_FILE", "").strip()
+        if read_file:
+            return read_file, "HA_TOKEN_FILE", True
+    raise HomeError("HA_ACTIONS_TOKEN_FILE is not set.")
+
+
+def read_token_in_use() -> bool:
+    """True when, by the user's opt-in, actions go out with the READ token (the
+    fallback, or an actions file holding the same token). Reads files only to
+    compare; never returns or logs a value. False on any doubt."""
+    if not allow_read_token():
+        return False
+    try:
+        path, label, fallback = _actions_token_source()
+        token = _read_secret_file(path, label)
+        return bool(token) and (fallback or _same_as_read_token(token, path))
+    except HomeError:
+        return False
+
+
 def _config() -> tuple[str, str]:
     """(base url, token) of the ACTION credential. Only a file: there is no
     HA_ACTIONS_TOKEN variable on purpose, an environment is inherited."""
-    token_file = os.environ.get("HA_ACTIONS_TOKEN_FILE", "").strip()
-    if not token_file:
-        raise HomeError("HA_ACTIONS_TOKEN_FILE is not set.")
-    token = _read_secret_file(token_file, "HA_ACTIONS_TOKEN_FILE")
+    token_file, label, _fallback = _actions_token_source()
+    token = _read_secret_file(token_file, label)
     url = (os.environ.get("HA_ACTIONS_URL", "").strip()
            or os.environ.get("HA_URL", "").strip()).rstrip("/")
     if not url or not token:
@@ -466,18 +501,19 @@ def _config() -> tuple[str, str]:
     if (parts.scheme not in ("http", "https") or not parts.hostname
             or parts.username or parts.password or parts.query or parts.fragment):
         raise HomeError("The Home Assistant address is not a valid http(s) address.")
-    _refuse_the_read_token(token, token_file)
+    if not allow_read_token():
+        _refuse_the_read_token(token, token_file)
     return url, token
 
 
-def _refuse_the_read_token(token: str, token_file: str) -> None:
-    """The action credential must be a different token from the read one."""
+def _same_as_read_token(token: str, token_file: str) -> bool:
+    """Is this the read token (same file, or same value as the file or HA_TOKEN)?"""
     read_file = os.environ.get("HA_TOKEN_FILE", "").strip()
     read_values = []
     if read_file:
         try:
             if os.path.samefile(read_file, token_file):
-                raise HomeError("HA_ACTIONS_TOKEN_FILE must not be the read token's file.")
+                return True
         except OSError:
             pass
         try:
@@ -487,10 +523,22 @@ def _refuse_the_read_token(token: str, token_file: str) -> None:
     inline = os.environ.get("HA_TOKEN", "").strip()
     if inline:
         read_values.append(inline)
-    for value in read_values:
-        if value and hmac.compare_digest(value.encode("utf-8"), token.encode("utf-8")):
-            raise HomeError("The action token must not be the read-only token: "
-                            "create a separate long-lived token.")
+    return any(value and hmac.compare_digest(value.encode("utf-8"), token.encode("utf-8"))
+               for value in read_values)
+
+
+def _refuse_the_read_token(token: str, token_file: str) -> None:
+    """The action credential must be a different token from the read one."""
+    read_file = os.environ.get("HA_TOKEN_FILE", "").strip()
+    if read_file:
+        try:
+            if os.path.samefile(read_file, token_file):
+                raise HomeError("HA_ACTIONS_TOKEN_FILE must not be the read token's file.")
+        except OSError:
+            pass
+    if _same_as_read_token(token, token_file):
+        raise HomeError("The action token must not be the read-only token: "
+                        "create a separate long-lived token.")
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
