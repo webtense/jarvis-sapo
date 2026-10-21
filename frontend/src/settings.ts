@@ -205,12 +205,23 @@ function buildPanelHTML(): string {
               <option value="sir">${h(t("Sir"))}</option>
               <option value="ma'am">${h(t("Ma'am"))}</option>
               <option value="none">${h(t("None"))}</option>
+              <option value="name">${h(t("My name"))}</option>
             </select>
+            <p class="settings-restart-notice" id="honorific-name-hint" style="display:none; text-align:left">
+              ${h(t("JARVIS will call you by the name above."))}
+            </p>
+            <p class="settings-restart-notice" id="honorific-name-warning"
+               style="display:none; text-align:left; color:var(--settings-warning-color, #e0a030)">
+              ${h(t("Add your name above, or this behaves as \"None\"."))}
+            </p>
           </div>
 
           <div class="settings-actions">
             <button class="settings-btn primary" id="btn-save-prefs">${h(t("Save Preferences"))}</button>
           </div>
+          <p class="settings-restart-notice" id="prefs-saved-notice" style="display:none">
+            ${h(t("Saved. JARVIS's spoken replies use it right away; the brain picks it up next conversation, or after \"start fresh\"."))}
+          </p>
         </section>
 
         <!-- System Info -->
@@ -484,6 +495,21 @@ async function loadStatus() {
   }
 }
 
+/** Shows or hides the "My name" hint and empty-name warning under the
+ * Honorific select, from whatever is currently in the two fields — called
+ * on load and on every change to either one, so the panel never shows a
+ * warning that is already out of date. */
+function updateHonorificNotice() {
+  const nameEl = document.getElementById("input-user-name") as HTMLInputElement | null;
+  const honEl = document.getElementById("input-honorific") as HTMLSelectElement | null;
+  const hint = document.getElementById("honorific-name-hint");
+  const warning = document.getElementById("honorific-name-warning");
+  const isName = honEl?.value === "name";
+  const hasName = !!(nameEl && nameEl.value.trim());
+  if (hint) hint.style.display = isName ? "block" : "none";
+  if (warning) warning.style.display = isName && !hasName ? "block" : "none";
+}
+
 async function loadPreferences() {
   try {
     const prefs = await apiGet<PreferencesResponse>("/api/settings/preferences");
@@ -491,6 +517,7 @@ async function loadPreferences() {
     const honEl = document.getElementById("input-honorific") as HTMLSelectElement;
     if (nameEl) nameEl.value = prefs.user_name || "";
     if (honEl) honEl.value = prefs.honorific || "sir";
+    updateHonorificNotice();
   } catch (e) {
     console.error("[settings] failed to load preferences:", e);
   }
@@ -557,11 +584,18 @@ function wireEvents() {
     }
   });
 
+  // Preferences: keep the "My name" hint/warning in step with both fields.
+  document.getElementById("input-user-name")?.addEventListener("input", updateHonorificNotice);
+  document.getElementById("input-honorific")?.addEventListener("change", updateHonorificNotice);
+
   // Save preferences
   document.getElementById("btn-save-prefs")?.addEventListener("click", async () => {
     const user_name = (document.getElementById("input-user-name") as HTMLInputElement).value.trim();
     const honorific = (document.getElementById("input-honorific") as HTMLSelectElement).value;
-    await apiPost("/api/settings/preferences", { user_name, honorific });
+    const result = await apiPost<{ success: boolean; error?: string }>(
+      "/api/settings/preferences", { user_name, honorific });
+    const notice = document.getElementById("prefs-saved-notice");
+    if (notice) notice.style.display = result?.success ? "block" : "none";
     await loadStatus();
   });
 

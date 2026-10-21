@@ -51,6 +51,12 @@ export const ES: Record<string, string> = {
   "Sir": "Señor",
   "Ma'am": "Señora",
   "None": "Ninguno",
+  "My name": "Mi nombre",
+  "JARVIS will call you by the name above.": "JARVIS le llamará por el nombre de arriba.",
+  "Add your name above, or this behaves as \"None\".":
+    "Añada su nombre arriba, o esto se comportará como «Ninguno».",
+  "Saved. JARVIS's spoken replies use it right away; the brain picks it up next conversation, or after \"start fresh\".":
+    "Guardado. Las respuestas habladas de JARVIS lo usan de inmediato; el cerebro lo recoge en la próxima conversación, o tras decir «empezar de cero».",
   "Save Preferences": "Guardar preferencias",
   "System Info": "Información del sistema",
   "Server port": "Puerto del servidor",

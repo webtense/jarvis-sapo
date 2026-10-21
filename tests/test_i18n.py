@@ -603,6 +603,69 @@ def test_every_pair_reads_well_without_the_honorific(es, monkeypatch):
                 assert expected_word in out
 
 
+def test_every_pair_reads_well_addressed_by_name(es, monkeypatch):
+    """Requirement: no sentence keeps "señor" once HONORIFIC=name, across
+    every shape the catalogue uses (", señor", "señor,", " señor.", and a bare
+    "señor")."""
+    monkeypatch.setenv("HONORIFIC", "name")
+    monkeypatch.setenv("USER_NAME", "Andrés")
+    for english, spanish in i18n_es.PAIRS:
+        out = i18n._honorific_es(spanish)
+        assert not re.search(r"\bseñor\b", out, re.IGNORECASE), (english, out)
+        if "señor" in spanish:
+            assert "Andrés" in out, (english, spanish, out)
+
+
+def test_every_senor_shape_is_covered_by_the_name_substitution(es, monkeypatch):
+    """The four shapes the task calls out, each proven against a concrete
+    sentence rather than only the general sweep above."""
+    monkeypatch.setenv("HONORIFIC", "name")
+    monkeypatch.setenv("USER_NAME", "Andrés")
+    assert i18n.t("Cancelled, sir.") == "Cancelado, Andrés."            # ", señor."
+    assert i18n.t("Which one, sir?") == "¿Cuál, Andrés?"                # ", señor?"
+    assert (i18n.t("Cleared, sir — nothing of that conversation left. Go ahead.")
+            == "Hecho, Andrés: no queda nada de esa conversación. Adelante.")
+    assert i18n.t("hammer is waiting on a dialog, sir.") == \
+        "hammer está esperando un diálogo, Andrés."
+
+
+def test_the_name_honorific_handles_accents_and_enye_and_case(es, monkeypatch):
+    monkeypatch.setenv("HONORIFIC", "name")
+    for name in ("Andrés", "Begoña", "JOSÉ"):
+        monkeypatch.setenv("USER_NAME", name)
+        assert i18n.t("Cancelled, sir.") == f"Cancelado, {name}."
+
+
+def test_an_empty_name_behaves_as_none(es, monkeypatch):
+    monkeypatch.setenv("HONORIFIC", "name")
+    monkeypatch.setenv("USER_NAME", "")
+    assert i18n.t("Cancelled, sir.") == "Cancelado."
+    monkeypatch.delenv("USER_NAME", raising=False)
+    assert i18n.t("Cancelled, sir.") == "Cancelado."
+
+
+def test_a_name_with_control_characters_is_sanitised_to_none(es, monkeypatch):
+    monkeypatch.setenv("HONORIFIC", "name")
+    for bad in ("Mal\nicioso", "Mal\x1b[2Jicioso", "Mal\ricioso"):
+        monkeypatch.setenv("USER_NAME", bad)
+        assert i18n.t("Cancelled, sir.") == "Cancelado."
+
+
+def test_the_name_honorific_is_ignored_in_english(monkeypatch):
+    monkeypatch.setenv("JARVIS_LANGUAGE", "en")
+    monkeypatch.setenv("HONORIFIC", "name")
+    monkeypatch.setenv("USER_NAME", "Andrés")
+    sentence = "Cancelled, sir."
+    assert i18n.t(sentence) is sentence
+
+
+def test_the_default_honorific_identity_is_unaffected_by_the_new_mode(es, monkeypatch):
+    """Sanity: adding "name" must not disturb "sir" (the default) at all."""
+    monkeypatch.delenv("HONORIFIC", raising=False)
+    monkeypatch.setenv("USER_NAME", "Andrés")
+    assert i18n.t("Cancelled, sir.") == "Cancelado, señor."
+
+
 def test_a_name_called_senor_is_never_rewritten(es, monkeypatch):
     monkeypatch.setenv("HONORIFIC", "none")
     assert i18n.t("Opened señor from chitauri, sir.") == "He abierto señor de chitauri."

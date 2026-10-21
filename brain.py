@@ -247,6 +247,17 @@ def plain_phrase(text) -> Optional[str]:
     value = str(text)
     return value if _PLAIN_PHRASE_RE.fullmatch(value) else None
 
+
+# How the user wants to be addressed, mirrors `i18n.honorific()`'s own
+# mapping of the same `HONORIFIC` values. Not imported from there: the
+# header line is driven off `self.config.honorific` (set once, at Brain
+# construction) rather than a live read of the environment, the same reason
+# `user_name` is a config field and not `os.environ.get(...)` inline — it is
+# what `tests/test_system_prompt_header.py` can poison deterministically.
+_HON_MADAM = frozenset({"ma'am", "ma’am", "maam", "madam", "señora", "senora", "female"})
+_HON_NONE = frozenset({"none", "ninguno", "ninguna", "no", "off"})
+_HON_NAME = frozenset({"name", "nombre"})
+
 # The handover is MODEL OUTPUT, and it used to be spliced into the next
 # generation's system prompt raw, introduced as "your own note from the
 # previous conversation". It is not: a generation is a process, not a self,
@@ -299,6 +310,7 @@ class BrainConfig:
     context_budget: int = 120000            # rotate once the CONVERSATION outgrows this
     max_turns_before_forced_rotation: int = 10
     user_name: str = ""
+    honorific: str = "sir"
     mcp_config: Optional[Path] = None
     # Names of the MCP servers the user declared for themselves, as accepted
     # by server.py's `declared_connections`. Empty on the ordinary install.
@@ -315,6 +327,7 @@ class BrainConfig:
             turn_timeout=float(os.getenv("JARVIS_BRAIN_TURN_TIMEOUT", "90")),
             context_budget=int(os.getenv("JARVIS_BRAIN_CONTEXT_BUDGET", "120000")),
             user_name=os.getenv("USER_NAME", ""),
+            honorific=os.getenv("HONORIFIC", "sir"),
         )
 
 
@@ -679,6 +692,23 @@ class Brain:
                 break
         return names
 
+    def _treatment_clause(self) -> str:
+        """How the Spanish persona should address the user this session, off
+        `HONORIFIC` — same sanitising as the name line above it: an ordinary
+        phrase goes in, anything else falls back to "sin tratamiento" rather
+        than ever splicing in something unusable."""
+        raw = str(self.config.honorific or "sir").strip().lower()
+        if raw in _HON_MADAM:
+            desc = "señora"
+        elif raw in _HON_NONE:
+            desc = "sin tratamiento"
+        elif raw in _HON_NAME:
+            said_name = plain_phrase(self.config.user_name) if self.config.user_name else None
+            desc = f"por su nombre {said_name}" if said_name else "sin tratamiento"
+        else:
+            desc = "señor"
+        return f" El usuario quiere que le trates de: {desc}."
+
     def launch_prompt(self) -> str:
         now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
         # `USER_NAME` out of the `.env` the settings endpoints write. It is
@@ -686,7 +716,8 @@ class Brain:
         # name goes in, anything else is left out rather than substituted.
         said_name = plain_phrase(self.config.user_name) if self.config.user_name else None
         who = f" The user's name is {said_name}." if said_name else ""
-        base = f"Session started {now}.{who} This is brain generation {self.generation}."
+        treatment = self._treatment_clause()
+        base = f"Session started {now}.{who}{treatment} This is brain generation {self.generation}."
         # Said here as well as in CLAUDE.md, on purpose. `sync_persona` now
         # carries template changes into an UNEDITED brain home, but a user who
         # has edited their CLAUDE.md keeps it untouched for ever — and this

@@ -7590,6 +7590,12 @@ class KeyUpdate(BaseModel):
 class KeyTest(BaseModel):
     key_value: str | None = None
 
+# The closed list of values Settings' honorific <select> may send. Anything
+# else is refused rather than silently falling back to "sir" — a typo or a
+# hand-made request should say so, not save something the user never chose.
+HONORIFIC_VALUES = frozenset({"sir", "ma'am", "none", "name"})
+
+
 class PreferencesUpdate(BaseModel):
     user_name: str = ""
     honorific: str = "sir"
@@ -7743,6 +7749,10 @@ async def api_get_preferences():
 async def api_save_preferences(body: PreferencesUpdate):
     # Validate both before writing either, so a bad honorific cannot leave
     # the name half-saved.
+    if body.honorific not in HONORIFIC_VALUES:
+        return JSONResponse(
+            {"success": False, "error": i18n.t("That is not a valid honorific")},
+            status_code=400)
     try:
         for key, value in (("USER_NAME", body.user_name),
                            ("HONORIFIC", body.honorific)):
