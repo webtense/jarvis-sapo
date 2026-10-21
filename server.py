@@ -66,6 +66,8 @@ from pydantic import BaseModel
 
 import actions
 import bridge
+import ha_watch
+import home_actions
 import builds
 import i18n
 import preflight
@@ -1863,6 +1865,7 @@ async def lifespan(application: FastAPI):
 
     await start_brain_and_speech()
     await start_session_watcher()
+    await start_home_watch()
     if tts.provider() in ("piper", "kokoro"):
         # Loading the voice is ~1.5 s; do it now rather than in the middle of
         # the first sentence. Off the loop, and never fatal.
@@ -1878,6 +1881,7 @@ async def lifespan(application: FastAPI):
 
     yield
 
+    await stop_home_watch()
     await stop_session_watcher()
     await stop_brain_and_speech()
 
@@ -2459,6 +2463,8 @@ TAINT_EXEMPT_TOOLS = {
     "remember": "it writes a memory, it does not read",
     "project_note": "it writes a note, it does not read",
     "write_journal": "it writes the journal, it does not read",
+    "home_propose": ("it only PROPOSES an action on the house: nothing is sent "
+                     "until the user says yes aloud, and it reads nothing"),
 }
 
 # Acting tools that only ever bring back MORE content to read. They are gated
@@ -6588,7 +6594,25 @@ async def _bridge_announced_when_spoken(pid: str, utt, epoch: int) -> None:
         log.warning("bridge: waiting for a proposal announcement failed: %s", e)
         return
     if ok:
+        pending = bridge_state.proposals.get(pid)
+        if pending is not None and pending.kind == "home":
+            # The question was asked from INSIDE a brain turn, which may still
+            # be talking. A "yes" is the user's answer to the question only
+            # once the brain has finished: until then it might be answering
+            # something the brain just said.
+            if not await _brain_turn_over(bridge.SPEAK_WAIT_MAX):
+                return
         bridge_state.mark_announced(pid, epoch)
+
+
+async def _brain_turn_over(timeout: float) -> bool:
+    """True once no brain turn is in flight (a stand-in brain has no lock)."""
+    lock = getattr(brain_instance, "_turn_lock", None)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while lock is not None and lock.locked() and loop.time() < deadline:
+        await asyncio.sleep(0.05)
+    return lock is None or not lock.locked()
 
 
 def _bridge_memory_exists(fact: str) -> bool:
@@ -6601,6 +6625,9 @@ def _bridge_memory_exists(fact: str) -> bool:
 
 async def _bridge_decide(pid: str, accept: bool, *, spoken: bool = False) -> str:
     """The user's decision on one proposal. The only write in the bridge."""
+    pending_home = bridge_state.proposals.get(pid)
+    if pending_home is not None and pending_home.kind == "home":
+        return await _home_decide(pid, accept, via="voice" if spoken else "panel")
     if spoken and accept:
         pending = bridge_state.proposals.get(pid)
         if pending is not None and _bridge_memory_exists(pending.fact):
@@ -6637,7 +6664,7 @@ async def _bridge_take_utterance(text: str) -> bool:
     proposal = bridge_state.awaiting_decision()
     if proposal is None:
         return False
-    decision = bridge.classify_decision(text)
+    decision = bridge.classify_decision(text, strict=proposal.kind == "home")
     if decision is None:
         return False
     line = await _bridge_decide(proposal.id, decision == "yes", spoken=True)
@@ -6670,9 +6697,191 @@ async def bridge_answer(body: _BridgeAnswer):
 async def bridge_memory_decision(pid: str, decision: str):
     if decision not in ("confirm", "reject"):
         return JSONResponse(status_code=404, content={"error": i18n.t("Not found")})
-    if pid not in bridge_state.proposals:
+    pending = bridge_state.proposals.get(pid)
+    if pending is None or pending.kind != "memory":
         return JSONResponse(status_code=404, content={"error": i18n.t("Not found")})
     return {"ok": True, "text": await _bridge_decide(pid, decision == "confirm")}
+
+
+# ---------------------------------------------------------------------------
+# Home control: propose, ask aloud, act only on the user's own "yes"
+# ---------------------------------------------------------------------------
+#
+# Off unless the user wrote data/jarvis/home-actions.json (home_actions.py has
+# the policy and says what it protects). The brain's only part is
+# `home_propose`, which VALIDATES and STAGES an action as a pending proposal
+# (the same mechanism as a memory proposal: bridge.py) and says it aloud in
+# full. The action is performed by `_home_decide`, called from the user's
+# spoken yes (`_bridge_take_utterance`) or from the panel, and never from a
+# tool call, a transcript, another session or Home Assistant.
+
+home_limits = home_actions.Limits()
+HOME_PROPOSAL_TTL = 120.0          # a pending action is forgotten after this
+_HOME_TOOL_ARGS = ("entity_id", "service", "temperature", "brightness_pct",
+                   "volume_level")
+
+
+async def tool_home_propose(args: dict) -> str:
+    """Stage ONE action on the house and ask the user about it aloud. Never
+    performs it. The text goes back to the brain, not to the user."""
+    unknown = sorted(k for k in args if k not in _HOME_TOOL_ARGS)
+    entity = str(args.get("entity_id", ""))
+    service = str(args.get("service", ""))
+    try:
+        policy = home_actions.load_policy()
+    except home_actions.Disabled as e:
+        return (f"Home control is not available: {e} Tell the user it is "
+                f"switched off; do not try another way.")
+    try:
+        if unknown:
+            raise home_actions.Refused("Arguments not allowed: "
+                                       + ", ".join(home_actions._safe_key(k) for k in unknown) + ".")
+        action = policy.check(args.get("entity_id"), args.get("service"),
+                              {k: args[k] for k in _HOME_TOOL_ARGS[2:] if k in args})
+    except home_actions.Refused as e:
+        home_actions.audit(None, confirmed_by="none", result=f"refused: {e}",
+                           entity_id=entity, service=service)
+        return f"Refused: {e} Tell the user plainly that you cannot do that."
+    if not home_limits.may_propose():
+        return ("Too many requests for the house in a few minutes. Tell the "
+                "user, and wait before proposing another.")
+    if not home_actions.audit_ready():
+        return ("The audit log cannot be written, so no action is proposed. "
+                "Tell the user.")
+    spoken = home_actions.question(action)
+    bridge_state.drop_kind("home")          # one pending action at a time
+    proposal = bridge_state.propose(spoken, "home", kind="home",
+                                    payload=action.as_dict(),
+                                    window=bridge.HOME_CONFIRM_WINDOW)
+    home_actions.audit(action, confirmed_by="none", result="proposed")
+    epoch = bridge_state.brain_epoch
+    utt = await _bridge_say(spoken, priority=Priority.NORMAL, immediate=False)
+    if utt is not None:
+        _spawn(_bridge_announced_when_spoken(proposal.id, utt, epoch))
+    elif not policy.panel_confirm:
+        bridge_state.take(proposal.id)
+        return ("Nobody can hear JARVIS right now, so nothing was asked and "
+                "nothing was done. Tell the user.")
+    note = (" This is a dry run: nothing will really be touched."
+            if home_actions.dryrun() else "")
+    return ("Pending the user's confirmation: JARVIS is asking him aloud, word "
+            "for word. NOTHING has been done. Say nothing more and end your "
+            "turn; never say it was done." + note)
+
+
+TOOL_HANDLERS["home_propose"] = tool_home_propose
+# Acting: only on a turn the user drove (origin), and refused in a turn that
+# has read anything foreign (`_untrusted_content_refusal`).
+ACTING_TOOLS.add("home_propose")
+
+
+async def _home_decide(pid: str, accept: bool, *, via: str) -> str:
+    """The user's yes or no to a pending home action. The only place an
+    action is performed. Returns the sentence JARVIS says (already in the
+    spoken language). `via` is "voice" or "panel"."""
+    pending = bridge_state.proposals.get(pid)
+    if pending is None or pending.kind != "home":
+        return i18n.t("That request is no longer pending, sir.")
+    payload = pending.payload or {}
+    raw = dict(entity=str(payload.get("entity_id", "")),
+               service=str(payload.get("service", "")), params=payload.get("params"))
+
+    def log_raw(result: str) -> None:
+        home_actions.audit(None, confirmed_by=via, result=result,
+                           entity_id=raw["entity"], service=raw["service"],
+                           params=raw["params"])
+
+    try:
+        policy = home_actions.load_policy()
+    except home_actions.Disabled:
+        policy = None
+    if accept and via == "panel" and (policy is None or not policy.panel_confirm):
+        # Not consumed: it can still be confirmed aloud.
+        return i18n.t("Confirm that one aloud, sir.")
+    bridge_state.take(pid)
+    if not accept:
+        log_raw("rejected")
+        return i18n.t("Understood, sir. I've done nothing.")
+    if bridge_state.now() - pending.created > HOME_PROPOSAL_TTL:
+        log_raw("expired")
+        return i18n.t("That request has expired, sir. Ask me again.")
+    try:
+        if policy is None:
+            raise home_actions.Refused("home control is off")
+        action = policy.check(raw["entity"], raw["service"], raw["params"])
+    except home_actions.Refused:
+        log_raw("refused: the allow-list changed")
+        return i18n.t("I can't do that any more, sir. The list of allowed actions has changed.")
+    if not home_limits.may_act(policy.max_per_minute):
+        home_actions.audit(action, confirmed_by=via, result="refused: too many per minute")
+        return i18n.t("Too many actions in a minute, sir. I'll wait.")
+    if not home_actions.audit_ready():
+        return i18n.t("I can't keep a record of it, sir, so I'll not do it.")
+    outcome = await asyncio.to_thread(home_actions.perform, action)
+    home_actions.audit(action, confirmed_by=via, result=outcome.code)
+    if outcome.ok:
+        if outcome.code == "dryrun":
+            return i18n.t("Dry run, sir: nothing was touched.")
+        return i18n.t("Done, sir.")
+    if outcome.code == "unreachable":
+        return i18n.t("I couldn't reach Home Assistant, sir.")
+    if outcome.code.startswith(("http_", "redirect")):
+        return i18n.t("Home Assistant refused it, sir.")
+    return i18n.t("I couldn't do that, sir: home control is not set up properly.")
+
+
+@app.post("/api/home/{pid}/{decision}")
+async def home_decision(pid: str, decision: str):
+    """The panel's yes or no. `confirm` only works if the user's allow-list
+    says `"panel_confirm": true`; `reject` always works."""
+    if decision not in ("confirm", "reject"):
+        return JSONResponse(status_code=404, content={"error": i18n.t("Not found")})
+    pending = bridge_state.proposals.get(pid)
+    if pending is None or pending.kind != "home":
+        return JSONResponse(status_code=404, content={"error": i18n.t("Not found")})
+    return {"ok": True, "text": await _home_decide(pid, decision == "confirm", via="panel")}
+
+
+# --- spoken alerts (ha_watch.py): opt-in, read only, never urgent but the alarm
+
+_home_watch_task: Optional[asyncio.Task] = None
+
+
+async def _home_alert_deliver(alert: "ha_watch.Alert") -> None:
+    text = i18n.t(alert.text)
+    if speech is not None and voice_clients:
+        if alert.urgent:
+            await speech.say(text, Priority.URGENT, immediate=True)
+        else:
+            await speech.say(text, Priority.LOW)       # batched, at a pause
+        return
+    await _bridge_notify_fallback("JARVIS", text)
+
+
+async def start_home_watch() -> None:
+    """Start the alerts if (and only if) the user wrote and enabled
+    home-alerts.json. Never fatal."""
+    global _home_watch_task
+    try:
+        config = ha_watch.load_config()
+    except ha_watch.ConfigError as e:
+        log.info("home alerts off: %s", e)
+        return
+    _home_watch_task = asyncio.create_task(
+        ha_watch.run(ha_watch.Watcher(config), _home_alert_deliver))
+    log.info("home alerts on: %d rule(s), every %ds", len(config.rules),
+             int(config.interval_s))
+
+
+async def stop_home_watch() -> None:
+    global _home_watch_task
+    task, _home_watch_task = _home_watch_task, None
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 @app.websocket("/ws/sessions")

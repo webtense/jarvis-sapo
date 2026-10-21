@@ -12,6 +12,10 @@ y no se leen nunca; se activan copiando una entrada a tu
 `data/jarvis/connections.json` (el fichero que es tuyo y que una actualización
 no toca).
 
+> Controlar la casa con confirmación por voz y los avisos hablados son piezas
+> aparte, opcionales y apagadas por defecto: ver `docs/casa-control.md`. Esta
+> conexión sigue siendo solo lectura.
+
 ## Regla que no se negocia
 
 **JARVIS nunca ejecuta acciones sobre la casa ni sobre BTR desde aquí.** No

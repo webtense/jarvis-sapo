@@ -68,6 +68,9 @@ MAX_PROPOSALS = 20                 # pending memories; the oldest falls off
 # only until the brain says something else (`note_brain_turn`). Short on
 # purpose: a "yes" that late is more likely meant for somebody else.
 CONFIRM_WINDOW = 15.0
+# Same rule for a proposed ACTION on the house (home_actions.py), only
+# shorter: it opens a door or a heating line, so a late "yes" is worth less.
+HOME_CONFIRM_WINDOW = 12.0
 
 # Newlines and tabs stay: the TTS cleaner turns them into pauses.
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
@@ -154,6 +157,12 @@ def frame_remember(label: str, text: str) -> str:
 _YES = frozenset({"sí", "si", "vale", "guárdalo", "guardalo", "guárdala",
                   "guardala", "adelante", "confirma", "confirmo", "correcto",
                   "yes", "ok", "okay", "save", "keep", "sure", "confirm"})
+# What counts as "yes" to a proposed action on the house. Narrower than _YES:
+# "save", "keep" and "guárdalo" are answers about memories, and the thing
+# being decided here moves something in the real world.
+_YES_ACTION = frozenset({"sí", "si", "vale", "adelante", "confirma",
+                         "confirmo", "correcto", "hazlo", "yes", "ok",
+                         "okay", "sure", "confirm"})
 _NO = frozenset({"no", "descarta", "descártalo", "descartalo", "descártala",
                  "olvídalo", "olvidalo", "rechaza", "rechazo", "nope",
                  "discard", "reject", "forget"})
@@ -169,22 +178,26 @@ def _words(text: str) -> list[str]:
     return _WORD_RE.findall((text or "").lower())
 
 
-def classify_decision(text: str) -> Optional[str]:
+def classify_decision(text: str, *, strict: bool = False) -> Optional[str]:
     """'yes', 'no' or None for the user's reply to "shall I keep it?".
 
     Deliberately narrow: at most four words, all of them from a short list.
     A sentence about something else is NOT a decision and goes to the brain
     as usual. Plain matching on purpose — the thing deciding whether a
     proposal from an untrusted session becomes a memory is not a model.
+
+    `strict` is for a proposed action on the house: a shorter list of yeses
+    (`_YES_ACTION`), the same "no".
     """
     words = _words(text)
     if not words or len(words) > 4:
         return None
-    has_yes = any(w in _YES for w in words)
+    yes_words = _YES_ACTION if strict else _YES
+    has_yes = any(w in yes_words for w in words)
     has_no = any(w in _NO for w in words)
     if has_yes == has_no:              # neither, or both: ambiguous
         return None
-    allowed = (_YES if has_yes else _NO) | _FILLER
+    allowed = (yes_words if has_yes else _NO) | _FILLER
     if not all(w in allowed for w in words):
         return None
     return "yes" if has_yes else "no"
@@ -235,6 +248,12 @@ class Proposal:
     label: str
     created: float
     announced_at: Optional[float] = None
+    # "memory" (the bridge's own) or "home" (an action on the house, whose
+    # validated, ready-to-run description is `payload`; `fact` then holds the
+    # sentence that was spoken). One pending-and-confirm mechanism, two uses.
+    kind: str = "memory"
+    payload: Optional[dict] = None
+    window: float = CONFIRM_WINDOW
 
 
 class Bridge:
@@ -313,13 +332,27 @@ class Bridge:
         return True
 
     # -- memory proposals -------------------------------------------------
-    def propose(self, fact: str, label: str) -> Proposal:
+    def propose(self, fact: str, label: str, *, kind: str = "memory",
+                payload: Optional[dict] = None,
+                window: float = CONFIRM_WINDOW) -> Proposal:
         while len(self.proposals) >= MAX_PROPOSALS:
             self.proposals.pop(next(iter(self.proposals)))
         p = Proposal(id=secrets.token_hex(3), fact=fact, label=label,
-                     created=self._clock())
+                     created=self._clock(), kind=kind, payload=payload,
+                     window=window)
         self.proposals[p.id] = p
         return p
+
+    def now(self) -> float:
+        """The bridge's own clock, for callers that age a proposal."""
+        return self._clock()
+
+    def drop_kind(self, kind: str) -> int:
+        """Forget every pending proposal of one kind; how many went."""
+        gone = [pid for pid, p in self.proposals.items() if p.kind == kind]
+        for pid in gone:
+            self.proposals.pop(pid, None)
+        return len(gone)
 
     @property
     def brain_epoch(self) -> int:
@@ -349,7 +382,7 @@ class Bridge:
         now = self._clock()
         asked = [p for p in self.proposals.values()
                  if p.announced_at is not None
-                 and now - p.announced_at < CONFIRM_WINDOW]
+                 and now - p.announced_at < p.window]
         return max(asked, key=lambda p: p.announced_at) if asked else None
 
     def take(self, pid: str) -> Optional[Proposal]:
@@ -366,5 +399,11 @@ class Bridge:
                 "text": q.text, "session": q.label, "armed": q.armed},
             "proposals": [{"id": p.id, "fact": p.fact, "session": p.label,
                            "age": int(now - p.created)}
-                          for p in self.proposals.values()],
+                          for p in self.proposals.values()
+                          if p.kind == "memory"],
+            # Proposed actions on the house are NOT memories: the dashboard's
+            # memory list must never offer to "save" one. They are decided on
+            # /api/home/*, and show only the sentence that was spoken.
+            "home": [{"id": p.id, "text": p.fact, "age": int(now - p.created)}
+                     for p in self.proposals.values() if p.kind == "home"],
         }

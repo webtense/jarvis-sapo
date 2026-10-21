@@ -1,0 +1,26 @@
+{
+  "//": "EJEMPLO NO ACTIVO (enabled: false). Para usarlo, copia este fichero a data/jarvis/home-actions.json, pon enabled a true y deja SOLO lo que quieras que JARVIS pueda proponer. El fichero debe ser tuyo y no escribible por otros (chmod 600). Sin este fichero no hay acciones. Cada accion se dice entera en voz alta y solo se ejecuta si contestas que si. Prohibidos por codigo aunque los pongas: alarm_control_panel, lock, camera, script, automation, shell_command, homeassistant, persistent_notification. El token de acciones va APARTE del de lectura, en un fichero 600 (HA_ACTIONS_TOKEN_FILE). Ver docs/casa-control.md.",
+  "enabled": false,
+  "panel_confirm": false,
+  "entities": {
+    "light.salon": "la luz del salón",
+    "switch.cafetera": "la cafetera",
+    "scene.cine": "la escena de cine",
+    "climate.salon": "la calefacción del salón",
+    "media_player.salon": "la tele del salón",
+    "cover.persiana_salon": "la persiana del salón"
+  },
+  "services": {
+    "light": ["turn_on", "turn_off"],
+    "switch": ["turn_on", "turn_off"],
+    "scene": ["turn_on"],
+    "climate": ["set_temperature"],
+    "media_player": ["media_play", "media_pause", "volume_set"],
+    "cover": ["open_cover", "close_cover"]
+  },
+  "limits": {
+    "max_per_minute": 3,
+    "climate": {"min_temp": 17, "max_temp": 23},
+    "media_player": {"max_volume": 0.4}
+  }
+}

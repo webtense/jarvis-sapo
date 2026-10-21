@@ -244,13 +244,17 @@ def test_protocol_basics():
 # --- the examples are inert and valid --------------------------------------
 
 EXAMPLES = sorted((REPO / "jarvis_home" / "connections.examples").glob("*.json"))
+# Not MCP connections: the allow-list of home actions and the alert rules
+# (docs/casa-control.md). They have their own tests and are inactive too.
+_NOT_SERVERS = {"home-actions.json", "home-alerts.json"}
+SERVER_EXAMPLES = [p for p in EXAMPLES if p.name not in _NOT_SERVERS]
 
 
 def test_the_examples_exist():
-    assert {p.name for p in EXAMPLES} == {"ha-readonly.json", "btr-aci-readonly.json"}
+    assert {p.name for p in EXAMPLES} == {"ha-readonly.json", "btr-aci-readonly.json"} | _NOT_SERVERS
 
 
-@pytest.mark.parametrize("path", EXAMPLES, ids=lambda p: p.name)
+@pytest.mark.parametrize("path", SERVER_EXAMPLES, ids=lambda p: p.name)
 def test_an_example_is_valid_json_with_one_server(path):
     body = json.loads(path.read_text("utf-8"))
     assert len(body["mcpServers"]) == 1

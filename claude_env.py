@@ -35,6 +35,14 @@ SCRUBBED_ENV_KEYS = {"CLAUDECODE"}
 # list applies to runs only, not to child_env().
 RUN_SCRUBBED_ENV_KEYS = {"HA_URL", "HA_TOKEN", "HA_TOKEN_FILE", "BTR_ACI_BASIC_AUTH"}
 
+# The credential that CAN act on the house (docs/casa-control.md). Unlike the
+# read-only ones above it is used by the JARVIS server process itself, after
+# the user said yes aloud, and by nobody else: neither an unattended run nor
+# the brain (nor any MCP server the brain starts) has any use for even its
+# path. So it is removed from BOTH environments, by prefix, so a variable
+# added later (HA_ACTIONS_URL...) is covered without anyone remembering.
+NEVER_INHERITED_PREFIXES = ("HA_ACTIONS_",)
+
 # asyncio.create_subprocess_exec gives a child's stdout/stderr StreamReader a
 # 64 KiB *line* buffer by default (asyncio.streams._DEFAULT_LIMIT). `claude -p
 # --output-format stream-json` emits one JSON object per line, and a single
@@ -63,9 +71,12 @@ def child_env(base: dict[str, str] | None = None) -> dict[str, str]:
     source = os.environ if base is None else base
     return {k: v for k, v in source.items()
             if not k.startswith(SCRUBBED_ENV_PREFIXES)
+            and not k.startswith(NEVER_INHERITED_PREFIXES)
             and k not in SCRUBBED_ENV_KEYS}
 
 
 def run_env(base: dict[str, str] | None = None) -> dict[str, str]:
     """child_env() minus the connection credentials, for unattended runs."""
-    return {k: v for k, v in child_env(base).items() if k not in RUN_SCRUBBED_ENV_KEYS}
+    return {k: v for k, v in child_env(base).items()
+            if k not in RUN_SCRUBBED_ENV_KEYS
+            and not k.startswith(NEVER_INHERITED_PREFIXES)}
