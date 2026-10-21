@@ -63,6 +63,22 @@ export const ES: Record<string, string> = {
   "no answer from the server": "el servidor no responde",
   "Next: Set Your Name": "Siguiente: su nombre",
   "Finish Setup": "Terminar la configuración",
+  "Kokoro (local, free)": "Kokoro (local y gratuita)",
+  "Edge (cloud, Microsoft)": "Edge (en la nube, Microsoft)",
+  "Automatic": "Automática",
+  "Voice engine": "Motor de voz",
+  "Voice": "Voz",
+  "Test voice": "Probar voz",
+  "Save voice": "Guardar voz",
+  "Cloud voice: the text of every sentence is sent to Microsoft. It is an unofficial service that may stop working; Piper takes over if it fails.":
+    "Voz en la nube: el texto de cada frase se envía a Microsoft. Es un servicio no oficial que puede dejar de funcionar; si falla, habla Piper.",
+  "Cloud voice: the text of every sentence is sent to Fish Audio.":
+    "Voz en la nube: el texto de cada frase se envía a Fish Audio.",
+  "Testing the voice...": "Probando la voz...",
+  "Playing the test phrase.": "Reproduciendo la frase de prueba.",
+  "That voice did not answer": "Esa voz no ha respondido",
+  "That voice could not be saved": "No se ha podido guardar esa voz",
+  "Saved. It applies from the next sentence.": "Guardado. Se aplica desde la próxima frase.",
 
   // ── Marco del panel de control (dashboard.html) ──────────────────────────
   "Run Control": "Control de ejecuciones",

@@ -464,8 +464,8 @@ _last_greeting_time: float = 0
 
 async def synthesize_speech(text: str) -> Optional[bytes]:
     """Generate speech audio from text using the active TTS provider."""
-    if tts.provider() == "piper":
-        r = await tts.synthesize_local(text)
+    if tts.provider() in ("piper", "kokoro", "edge"):
+        r = await tts.synthesize(text, fish_key=FISH_API_KEY, fish_voice_id=FISH_VOICE_ID)
         if r is not None:
             _session_tokens["tts_calls"] += 1
             _append_usage_entry(0, 0, "tts")
@@ -619,18 +619,10 @@ async def _voice_emit(msg: dict) -> None:
 
 
 async def _synth_for_speech(text: str) -> Optional[bytes]:
-    chosen = tts.provider()
-    if chosen == "piper":
-        r = await tts.synthesize_local(text)
-    elif chosen == "fish":
-        r = await tts.synthesize_chunk(text, api_key=FISH_API_KEY, voice_id=FISH_VOICE_ID, client=_tts_client)
-        if (r is None and tts.local_available()
-                and os.environ.get("JARVIS_TTS_PROVIDER", "auto").strip().lower() == "auto"):
-            # Fish just failed (tts.note_fish_failure has moved later sentences
-            # to Piper): say THIS one with the local voice instead of dropping it.
-            r = await tts.synthesize_local(text)
-    else:
-        return None
+    # tts.synthesize runs the cascade: the chosen provider, then the local
+    # voice if it fails (Fish falls back only when `auto` chose it).
+    r = await tts.synthesize(text, fish_key=FISH_API_KEY, fish_voice_id=FISH_VOICE_ID,
+                             client=_tts_client)
     if r is None:
         return None
     _session_tokens["tts_calls"] += 1
@@ -1871,7 +1863,7 @@ async def lifespan(application: FastAPI):
 
     await start_brain_and_speech()
     await start_session_watcher()
-    if tts.provider() == "piper":
+    if tts.provider() in ("piper", "kokoro"):
         # Loading the voice is ~1.5 s; do it now rather than in the middle of
         # the first sentence. Off the loop, and never fatal.
         _background.add(warm := asyncio.create_task(asyncio.to_thread(tts.warm_up_local)))
@@ -7196,6 +7188,10 @@ async def mic_handler(ws: WebSocket):
 # a restart.
 SETTABLE_ENV_KEYS = frozenset({
     "FISH_API_KEY", "FISH_VOICE_ID", "USER_NAME", "HONORIFIC",
+    # The voice picker in Settings (`/api/settings/voice`, which checks the
+    # values against what is installed). Read back by tts.py, which ignores
+    # anything that is not a provider name or the shape of a voice name.
+    "JARVIS_TTS_PROVIDER", "JARVIS_TTS_VOICE",
 })
 
 # A value may not carry anything that ends the line it is written on.
@@ -7363,6 +7359,91 @@ async def api_test_fish(body: KeyTest):
     except Exception as e:
         return {"valid": False, "error": str(e)[:200]}
 
+_VOICE_LABEL = {"fish": "Fish", "piper": "Piper", "kokoro": "Kokoro", "edge": "Edge"}
+
+
+def _voice_notice() -> str:
+    """Why the voice Settings shows is not the voice that was asked for, or ""."""
+    try:
+        fallback = tts.effective_provider()
+        label = _VOICE_LABEL.get(fallback, "")
+        if tts.wanted() in ("auto", "fish") and tts.fish_configured() and tts.fish_is_down():
+            spare = fallback not in ("fish", "none")
+            if tts.fish_down_is_account():
+                if spare:
+                    return i18n.t(f"Fish rejects the key: no credit or the key is invalid. Using {label}.")
+                return i18n.t("Fish rejects the key: no credit or the key is invalid, "
+                              "and there is no other voice to fall back on.")
+            if spare:
+                return i18n.t(f"Fish is not answering. Using {label} for now.")
+            return i18n.t("Fish is not answering, and there is no other voice to fall back on.")
+        if tts.wanted() == "edge" and tts.edge_is_down():
+            if fallback == "piper":
+                return i18n.t("The Edge voice is not answering. Using Piper for now.")
+            return i18n.t("The Edge voice is not answering.")
+    except Exception:
+        log.warning("voice notice failed", exc_info=True)
+    return ""
+
+
+class VoiceChoice(BaseModel):
+    provider: str
+    voice: str = ""
+
+
+def _voice_choice_problem(provider: str, voice: str) -> str | None:
+    """Why this provider/voice cannot be chosen, or None. Only what is
+    installed (and, for Fish, configured) can be chosen: the page offers
+    nothing else, and a hand-made request gets the same answer."""
+    if provider in ("auto", "none"):
+        return None if not voice else i18n.t("That voice does not exist")
+    if provider not in tts.PROVIDERS:
+        return i18n.t("That voice provider does not exist")
+    entry = next((p for p in tts.status()["providers"] if p["id"] == provider), None)
+    if entry is None or not entry["available"]:
+        return i18n.t("That voice provider is not installed")
+    if voice and (provider == "fish" or voice not in entry["voices"]):
+        return i18n.t("That voice does not exist")
+    return None
+
+
+@app.post("/api/settings/voice")
+async def api_settings_voice(body: VoiceChoice):
+    """Choose the voice provider (and voice) from Settings. Written through the
+    same `.env` writer as the keys; it takes effect on the next sentence."""
+    problem = _voice_choice_problem(body.provider, body.voice)
+    if problem:
+        return JSONResponse({"success": False, "error": problem}, status_code=400)
+    try:
+        _write_env_key("JARVIS_TTS_PROVIDER", body.provider)
+        if body.voice:
+            _write_env_key("JARVIS_TTS_VOICE", body.voice)
+    except ValueError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+    return {"success": True, "voice": tts.status(), "voice_notice": _voice_notice()}
+
+
+@app.post("/api/settings/voice-test")
+async def api_settings_voice_test(body: VoiceChoice):
+    """Say a short phrase with the provider/voice being looked at, without
+    saving it. Exactly that provider: no fallback, so a voice that does not
+    work says so. A cloud voice sends the phrase out, on this click only."""
+    problem = _voice_choice_problem(body.provider, body.voice)
+    if problem:
+        return JSONResponse({"success": False, "error": problem}, status_code=400)
+    phrase = i18n.t("Testing audio, sir.")
+    if body.provider == "auto":
+        r = await tts.synthesize(phrase, fish_key=FISH_API_KEY, fish_voice_id=FISH_VOICE_ID)
+    else:
+        r = await tts.synthesize_with(body.provider, phrase, voice=body.voice or None,
+                                      fish_key=FISH_API_KEY, fish_voice_id=FISH_VOICE_ID)
+    if r is None:
+        return {"audio": None, "error": i18n.t("That voice did not answer")}
+    return {"audio": base64.b64encode(r.audio).decode(),
+            "mime": "audio/wav" if r.audio[:4] == b"RIFF" else "audio/mpeg",
+            "provider": r.provider, "seconds": round(r.total_sec, 2)}
+
+
 @app.get("/api/settings/status")
 async def api_settings_status():
     import shutil as _shutil
@@ -7375,6 +7456,10 @@ async def api_settings_status():
         # Which voice answers right now ("fish" | "piper" | "none"): the panel
         # shows it, and only "none" makes the Fish key a problem to fix.
         "voice_provider": tts.provider(),
+        # The picker's data (tts.status()) and, when something is failing, a
+        # sentence to show; "" when all is well.
+        "voice": tts.status(),
+        "voice_notice": _voice_notice(),
         "env_keys_set": {
             "fish_audio": bool(env_dict.get("FISH_API_KEY", "").strip() and env_dict.get("FISH_API_KEY", "") != "your-fish-audio-api-key-here"),
             "fish_voice_id": bool(env_dict.get("FISH_VOICE_ID", "").strip()),

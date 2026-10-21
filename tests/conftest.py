@@ -31,9 +31,15 @@ def _no_local_voice_unless_asked(monkeypatch, request):
     local voice opt in with the `local_voice` fixture."""
     import tts
     monkeypatch.setattr(tts, "_fish_down_until", 0.0)      # no test inherits a Fish outage
+    monkeypatch.setattr(tts, "_edge_down_until", 0.0)
+    monkeypatch.setattr(tts, "_last_used", "")
+    # Kokoro and Edge are optional packages: a developer who has them must get
+    # the same results as the CI runner, which has neither.
+    monkeypatch.setattr(tts, "kokoro_available", lambda: False)
+    monkeypatch.setattr(tts, "edge_available", lambda: False)
     if request.module.__name__.endswith("test_local_voice"):
         return
-    monkeypatch.setattr(tts, "local_available", lambda: False)
+    monkeypatch.setattr(tts, "local_available", lambda voice=None: False)
 
 
 @pytest.fixture
