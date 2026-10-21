@@ -139,9 +139,12 @@ def test_the_source_has_no_way_to_write_except_the_pinned_token_refresh():
     assert code.count('method="POST"') == 1
     assert "_TOKEN_HOST = \"oauth2.googleapis.com\"" in src
     assert '_TOKEN_PATH = "/token"' in src
+    # `trashed=false` is a READ filter ("not in the bin") in the Drive search
+    # query, not the verb: take it out before looking for write verbs.
+    verbs_only = code.replace("trashed=false", "")
     for verb_route in ("/gmail/v1/users/me/messages/send", "/gmail/v1/users/me/drafts",
                        "/drive/v3/files/create", "trash", "delete", "/calendar/v3/calendars/.+/events\" ,"):
-        assert verb_route not in code or verb_route in ("delete",)  # 'delete' appears only in comments/prose
+        assert verb_route not in verbs_only or verb_route in ("delete",)  # 'delete' appears only in comments/prose
 
 
 def test_the_tools_advertise_no_write_capability():
