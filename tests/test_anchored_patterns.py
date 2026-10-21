@@ -273,6 +273,7 @@ SAMPLES = {
     "_PIPER_VOICE_RE": "es_ES-davefx-medium",
     "_KOKORO_VOICE_RE": "em_alex",
     "_EDGE_VOICE_RE": "es-ES-AlvaroNeural",
+    "_PATH_RE": "/api/services/light/turn_on",
 }
 
 ALPHABET = ("abcdefghijklmnopqrstuvwxyz0123456789"
