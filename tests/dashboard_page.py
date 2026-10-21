@@ -83,6 +83,7 @@ def _newest_source() -> float:
     newest = 0.0
     for path in list((FRONTEND / "src").rglob("*")) + [
             FRONTEND / "dashboard.html", FRONTEND / "index.html",
+            FRONTEND / "admin.html",
             FRONTEND / "vite.config.ts", FRONTEND / "package.json"]:
         if path.is_file():
             newest = max(newest, path.stat().st_mtime)

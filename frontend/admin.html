@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JARVIS · Admin</title>
+    <link rel="stylesheet" href="/src/admin/style.css" />
+  </head>
+  <body>
+    <!-- Nothing below the masthead is written by hand: every value on this
+         page comes from the server and is painted with textContent. See
+         src/admin/main.ts. -->
+    <header class="shell-head">
+      <div class="shell-head-top">
+        <div class="brand">
+          <span class="brand-mark">JARVIS</span>
+          <span class="brand-sub" data-i18n>Admin</span>
+        </div>
+        <a class="shell-link" href="/" data-i18n>Back to JARVIS</a>
+      </div>
+
+      <nav id="admin-tabs" class="tabs shell-tabs" role="tablist" aria-label="Sections" data-i18n-aria-label>
+        <button id="tab-profile" class="tab active" data-view="profile" data-i18n
+                role="tab" aria-selected="true" aria-controls="view-profile">Profile</button>
+        <button id="tab-voice" class="tab" data-view="voice" data-i18n
+                role="tab" aria-selected="false" aria-controls="view-voice">Voice</button>
+        <button id="tab-listening" class="tab" data-view="listening" data-i18n
+                role="tab" aria-selected="false" aria-controls="view-listening">Listening</button>
+        <button id="tab-connections" class="tab" data-view="connections" data-i18n
+                role="tab" aria-selected="false" aria-controls="view-connections">Connections</button>
+        <button id="tab-house" class="tab" data-view="house" data-i18n
+                role="tab" aria-selected="false" aria-controls="view-house">House</button>
+        <button id="tab-system" class="tab" data-view="system" data-i18n
+                role="tab" aria-selected="false" aria-controls="view-system">System</button>
+      </nav>
+    </header>
+
+    <main class="shell-main">
+      <div id="view-profile" class="view" role="tabpanel" aria-labelledby="tab-profile"></div>
+      <div id="view-voice" class="view" role="tabpanel" aria-labelledby="tab-voice" hidden></div>
+      <div id="view-listening" class="view" role="tabpanel" aria-labelledby="tab-listening" hidden></div>
+      <div id="view-connections" class="view" role="tabpanel" aria-labelledby="tab-connections" hidden></div>
+      <div id="view-house" class="view" role="tabpanel" aria-labelledby="tab-house" hidden></div>
+      <div id="view-system" class="view" role="tabpanel" aria-labelledby="tab-system" hidden></div>
+    </main>
+
+    <div id="admin-banner" class="banner tone-bad" role="status" hidden></div>
+
+    <script type="module" src="/src/admin/main.ts"></script>
+  </body>
+</html>

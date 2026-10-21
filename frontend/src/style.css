@@ -95,7 +95,11 @@ html, body {
   backdrop-filter: blur(12px);
 }
 
-#menu-dropdown button {
+/* El enlace a la pantalla de administración es un <a> de verdad (se puede
+   abrir en otra pestaña), así que comparte el aspecto de los botones del
+   menú en vez de tener uno propio. */
+#menu-dropdown button,
+#menu-dropdown a {
   display: block;
   width: 100%;
   padding: 8px 16px;
@@ -110,7 +114,10 @@ html, body {
   transition: all 0.15s;
 }
 
-#menu-dropdown button:hover {
+#menu-dropdown a { text-decoration: none; box-sizing: border-box; }
+
+#menu-dropdown button:hover,
+#menu-dropdown a:hover {
   background: rgba(14, 165, 233, 0.1);
   color: rgba(14, 165, 233, 0.8);
 }
@@ -481,3 +488,54 @@ html, body {
 }
 #hush:hover { color: #eaf8ff; border-color: rgba(79, 209, 255, 0.75); }
 #hush[hidden] { display: none; }
+
+/* Microphone switch — the one control that must never be hunted for. Large,
+   fixed to the bottom right corner and always on screen (the small icon in
+   the corner and the menu are not where anybody looks in a hurry). The label
+   is the state: LISTENING while the microphone is open, MUTE while it is
+   closed, with a green dot or a red one, so it does not rely on colour alone. */
+#mute-toggle {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 190px;
+  min-height: 60px;
+  padding: 14px 26px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #bff0d8;
+  background: rgba(8, 28, 22, 0.78);
+  border: 2px solid rgba(62, 224, 166, 0.65);
+  border-radius: 999px;
+  cursor: pointer;
+  z-index: 45;
+  backdrop-filter: blur(4px);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+#mute-toggle:hover { background: rgba(10, 40, 30, 0.9); }
+#mute-toggle:focus-visible { outline: 3px solid #9bd8ff; outline-offset: 3px; }
+#mute-toggle .mute-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #3ee0a6;
+  box-shadow: 0 0 10px rgba(62, 224, 166, 0.7);
+}
+#mute-toggle.is-muted {
+  color: #ffd5da;
+  background: rgba(56, 12, 20, 0.88);
+  border-color: rgba(255, 90, 110, 0.9);
+}
+#mute-toggle.is-muted .mute-dot {
+  background: #ff5a6e;
+  box-shadow: 0 0 10px rgba(255, 90, 110, 0.8);
+}
+@media (max-width: 480px) {
+  #mute-toggle { right: 12px; bottom: 12px; min-width: 150px; min-height: 52px; padding: 10px 18px; font-size: 14px; }
+}

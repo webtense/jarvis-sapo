@@ -93,11 +93,16 @@ function transition(newState: State) {
 
 const voiceInput = createVoiceInput(
   (text: string) => {
+    // A final result can still land after the microphone was muted (the
+    // recogniser is stopped, not aborted, so it may deliver what it had).
+    // Muted means nothing goes to the server, whatever the engine does.
+    if (isMuted) return;
     // The server decides whether this is echo, a barge-in, or a new turn.
     micMonitor.sawSpeech();
     socket.send({ type: "transcript", text, isFinal: true });
   },
   (text: string) => {
+    if (isMuted) return;
     micMonitor.sawSpeech();
     socket.send({ type: "interim", text });
   },
@@ -236,7 +241,10 @@ socket.onMessage((msg) => {
 // Start listening after a brief delay for the orb to render
 setTimeout(() => {
   voiceInput.start();
-  if (currentState !== "speaking") transition("listening");
+  // `start()` clears any pause. Muted before this timer fired (the button is
+  // there from the first frame) must stay muted: nothing may be captured.
+  if (isMuted) voiceInput.pause();
+  if (currentState !== "speaking") transition(isMuted ? "idle" : "listening");
 }, 1000);
 
 // Resume AudioContext on ANY user interaction (browser autoplay policy)
@@ -258,22 +266,67 @@ ensureAudioContext();
 // ---------------------------------------------------------------------------
 
 const btnMute = document.getElementById("btn-mute")!;
+const muteToggle = document.getElementById("mute-toggle")!;
+const muteLabel = document.getElementById("mute-label")!;
 const btnMenu = document.getElementById("btn-menu")!;
 const menuDropdown = document.getElementById("menu-dropdown")!;
 const btnRestart = document.getElementById("btn-restart")!;
 const btnFixSelf = document.getElementById("btn-fix-self")!;
 
-btnMute.addEventListener("click", (e) => {
-  e.stopPropagation();
-  isMuted = !isMuted;
+/** Both mute buttons and the keyboard show the same state, from `isMuted`. */
+function paintMute() {
   btnMute.classList.toggle("muted", isMuted);
+  btnMute.setAttribute("aria-pressed", String(isMuted));
+  muteToggle.classList.toggle("is-muted", isMuted);
+  muteToggle.setAttribute("aria-pressed", String(isMuted));
+  muteLabel.textContent = isMuted ? t("MUTE") : t("LISTENING");
+}
+
+/** The one place the microphone is muted or opened again. Muting pauses the
+ * engine (the browser recogniser stops; the local one stops SENDING audio to
+ * `/ws/mic`), and the transcript callbacks above drop anything that lands late. */
+function setMuted(next: boolean) {
+  if (next === isMuted) return;
+  isMuted = next;
+  paintMute();
   if (isMuted) {
     voiceInput.pause();
-    transition("idle");
+    // Only the "listening" look goes: a reply being thought or spoken keeps
+    // its own state, and the server moves it on when it ends.
+    if (currentState === "listening") transition("idle");
   } else {
-    voiceInput.resume();
-    transition("listening");
+    // While he speaks with JARVIS_MUTE_MIC_DURING_SPEECH on, the engine
+    // stays paused until he stops; `transition` resumes it then.
+    if (!(currentState === "speaking" && muteMicDuringSpeech)) voiceInput.resume();
+    if (currentState === "idle") transition("listening");
   }
+}
+
+paintMute();
+muteToggle.dataset.ready = "1";
+btnMute.addEventListener("click", (e) => {
+  e.stopPropagation();
+  setMuted(!isMuted);
+});
+muteToggle.addEventListener("click", (e) => {
+  e.stopPropagation();
+  setMuted(!isMuted);
+});
+
+/** A key pressed while typing is text, not a shortcut. */
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
+}
+
+// M mutes and unmutes. Esc keeps its own job (silencing JARVIS's voice).
+window.addEventListener("keydown", (e: KeyboardEvent) => {
+  if (e.key !== "m" && e.key !== "M") return;
+  if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+  if (isTypingTarget(e.target)) return;
+  e.preventDefault();
+  setMuted(!isMuted);
 });
 
 btnMenu.addEventListener("click", (e) => {

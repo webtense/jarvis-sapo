@@ -97,7 +97,7 @@ def _call_site_keys() -> dict[str, str]:
 
 def _html_keys() -> dict[str, str]:
     keys: dict[str, str] = {}
-    for name in ("index.html", "dashboard.html"):
+    for name in ("index.html", "dashboard.html", "admin.html"):
         src = (FRONTEND / name).read_text()
         for m in re.finditer(
                 r"<(\w+)([^>]*?)data-i18n(?:-(title|aria-label))?([^>]*)>", src):
@@ -143,6 +143,9 @@ DYNAMIC = [
     "is built.",
     "5-hour session", "7-day week", "7-day Opus",
     "JARVIS · Run Control",
+    # El título de la pantalla de administración: lo traduce `i18n.init()`
+    # desde `document.title`, no una llamada visible al escáner.
+    "JARVIS · Admin",
 ]
 
 
