@@ -630,4 +630,11 @@ PAIRS: list[tuple[str, str]] = [
     ("That setting must be between {low} and {high}",
      "Ese ajuste tiene que estar entre {low} y {high}"),
     ("There is nothing to save", "No hay nada que guardar"),
+    # --- Croac, the SapoFit coach (sapofit_watch.py) -------------------------
+    ("Croac says: {text}", "Croac dice: {text}"),
+    ("The rest is in the app, sir.", "El resto está en la app, señor."),
+    ("Croac has one new message for you, sir. It is in the app.",
+     "Croac tiene un mensaje nuevo para usted, señor. Está en la app."),
+    ("Croac has {n} new messages for you, sir. They are in the app.",
+     "Croac tiene {n} mensajes nuevos para usted, señor. Están en la app."),
 ]

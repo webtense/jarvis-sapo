@@ -85,6 +85,14 @@ interface ConnectionsResponse {
     scopes: string[];
     account_known: boolean;
   };
+  sapofit: {
+    configured: boolean;
+    token_file: string;
+    watch_enabled: boolean;
+    watch_running: boolean;
+    cursor: string;
+    last_read_at: string;
+  };
 }
 
 interface HomeLogLine {
@@ -599,6 +607,24 @@ function renderConnections(view: HTMLElement, data: ConnectionsResponse | null):
     google.body.appendChild(lines(data.google.scopes, ""));
   }
   view.appendChild(google.root);
+
+  // SapoFit and Croac's watch: states and times only. No message text is ever
+  // sent to this page, so none can be shown here.
+  const sapofit = panel(t("SapoFit"));
+  sapofit.body.appendChild(readout(t("Configured"),
+    data.sapofit.configured ? t("yes") : t("no"), toneFor(data.sapofit.configured)));
+  sapofit.body.appendChild(readout(t("Token file"),
+    tokenStateLabel(data.sapofit.token_file), toneFor(data.sapofit.token_file === "ok")));
+  const watchState = data.sapofit.watch_running ? t("watch running")
+    : data.sapofit.watch_enabled ? t("switched on, not running") : t("switched off");
+  sapofit.body.appendChild(readout(t("Coach watch"), watchState,
+    toneFor(data.sapofit.watch_running)));
+  sapofit.body.appendChild(readout(t("Last reading"),
+    data.sapofit.last_read_at || t("never")));
+  sapofit.body.appendChild(readout(t("Last cursor"),
+    data.sapofit.cursor || t("none")));
+  sapofit.body.appendChild(note(t("Only the coach's feed is read. No message is shown here, only when it was last read.")));
+  view.appendChild(sapofit.root);
 }
 
 // ---------------------------------------------------------------------------

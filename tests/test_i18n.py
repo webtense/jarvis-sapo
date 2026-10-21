@@ -769,10 +769,15 @@ def test_the_persona_in_castilian_names_the_same_tools_and_rules():
     # And the WhatsApp tools (the three readers of the user's own MCP server
     # and `whatsapp_propose`): the same reasoning, the sending one hidden from
     # the brain until the user writes his own whatsapp-actions.json.
+    # And the six SapoFit readers (sapofit_readonly_mcp.py): read only, and
+    # granted to the brain only when the user declares the connection himself.
     assert code(es_text) - code(en) == {"home_propose", "entity_id",
                                         "google_propose", "action",
                                         "whatsapp_propose", "whatsapp_list_chats",
-                                        "whatsapp_read_chat", "whatsapp_search"}
+                                        "whatsapp_read_chat", "whatsapp_search",
+                                        "sapofit_today", "sapofit_food_log",
+                                        "sapofit_weight", "sapofit_workouts",
+                                        "sapofit_workout_stats", "sapofit_streaks"}
     for spoken in ("empezar de cero",):
         assert spoken in es_text
     for loan in ("frontend", "transcript", "tests frente", "prompt "):

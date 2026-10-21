@@ -1,0 +1,12 @@
+{
+  "//": "EJEMPLO NO ACTIVO. Para usarlo, copia la entrada de 'mcpServers' dentro de data/jarvis/connections.json (NO este fichero) y cambia la ruta. El token NO va aqui: crealo en SapoFit > Perfil > Salud y guardalo en un fichero JSON 600 FUERA del repo con {url, token}, y apunta SAPOFIT_TOKEN_FILE a el. Solo lectura de TU SapoFit personal. Ver docs/sapofit.md.",
+  "mcpServers": {
+    "sapofit": {
+      "command": "python3",
+      "args": ["/RUTA/ABSOLUTA/A/jarvis/sapofit_readonly_mcp.py"],
+      "env": {
+        "SAPOFIT_TOKEN_FILE": "/RUTA/ABSOLUTA/FUERA/DEL/REPO/.config/jarvis/sapofit.json"
+      }
+    }
+  }
+}
