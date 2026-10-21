@@ -3,6 +3,16 @@
 Fork de [ethanplusai/jarvis](https://github.com/ethanplusai/jarvis) (© 2026 Ethan Rogers) orientado a Ubuntu/Linux.
 Versionado semántico con prefijo `ubuntu-`. Uso personal y no comercial, igual que la licencia original.
 
+## ubuntu-0.7.0 — palabra "Jarvis", voces, casa con confirmación, escritorio y E2E
+- **Palabra "Jarvis" sin modelo extra** (`JARVIS_WAKE_WORD=whisper`, `wake_text.py`): cada frase se transcribe y solo pasa al turno si empieza por "Jarvis" (variantes de transcripción y distancia de edición 1; se quita del texto), con una ventana de conversación (`JARVIS_WAKE_WINDOW_SEC`, 20 s). Coste: transcribe todo lo que oye. La opción `on` sigue siendo openWakeWord ("Hey Jarvis").
+- **Interrumpir hablando** (`JARVIS_BARGE_IN=on`, opt-in): si hablas encima, JARVIS se calla (como `hush`). Umbrales calibrados con eco simulado, no con el equipo real; la tecla Esc sigue siendo la vía fiable.
+- **Voz de salida**: proveedores Kokoro (local) y Edge TTS (nube de Microsoft, solo si lo eliges explícitamente; el texto sale del equipo) junto a Piper y Fish; selector de voz y botón "Probar voz" en Ajustes; aviso cuando Fish está configurado pero falla. Ver `docs/voz.md`.
+- **Casa con confirmación** (desactivada por defecto): `home_actions.py`, lista blanca explícita en `data/jarvis/home-actions.json`, dominios prohibidos por código (alarma, cerraduras, cámaras, scripts, automatizaciones...), token propio distinto del de lectura, confirmación hablada solo tras oír la pregunta entera (palabras de confirmación estrictas, `JARVIS_HOME_CONFIRM_STRICT=1` exige "sí, hazlo"; cualquier otra frase de JARVIS desarma la propuesta), auditoría JSONL, límite de frecuencia y simulacro (`JARVIS_HOME_DRYRUN=1`). **Avisos proactivos** (`ha_watch.py`, `home-alerts.json`, opt-in): alarma, llegadas y salidas, puerta abierta, consumo; tope por hora para la alarma. Ver `docs/casa-control.md` (riesgos residuales incluidos).
+- **Escritorio**: lanzador de GNOME (`scripts/install-launcher.sh`, `scripts/jarvis-app`, autoarranque opcional). Ver `docs/escritorio.md`.
+- **Pruebas E2E en CI** (job `e2e`, Ubuntu): Chromium con audio de fichero a través de AudioWorklet y `/ws/mic`, Firefox eligiendo el micrófono local, y la interfaz en castellano.
+- **Calidad de la traducción**: nombres de ficheros y proyectos ya no se traducen por error, tratamiento señor/señora según preferencia, plurales y concordancia, frases de errores web y del puente, punto de Fish neutro en Ajustes, `dist` del frontend robusto en los tests.
+- Conocido y pendiente: la interfaz del panel para confirmar acciones de la casa (hoy solo por voz o API); voz real en Firefox, barge-in y palabra "Jarvis" sin probar con micrófono real; BTR/ACI sin conectar; `server.py` sin partir.
+
 ## ubuntu-0.6.0 — todo en castellano, Firefox y Chrome
 - **Traducción completa**: textos del servidor (`i18n.py`, `i18n_es.py`, 277 plantillas, tratamiento "señor"; se traduce en las fronteras y nunca el contenido no confiable), interfaz web (361 textos, fechas y plurales es-ES, `frontend/src/i18n.ts`) y documentación (`README.es.md`, `CONTRIBUTING.es.md`, `.env.example` y scripts). Con `JARVIS_LANGUAGE=en` la salida es idéntica a la original.
 - **Ajustes**: la clave de Fish Audio es opcional; el panel muestra el proveedor de voz activo (Piper / Fish / ninguno) y enlaza a https://fish.audio/app/api-keys/.
