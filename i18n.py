@@ -132,9 +132,19 @@ def _translate(text: str, depth: int) -> str:
     return text
 
 
+# Longest text `t()` will look at; real phrases are far shorter.
+MAX_TRANSLATED_CHARS = 1500
+
+
 def t(text):
     """`text` in the spoken language: identity unless `JARVIS_LANGUAGE=es`."""
     if not isinstance(text, str) or lang.language() != "es":
+        return text
+    if len(text) > MAX_TRANSLATED_CHARS:
+        # A sentence JARVIS says is short. Anything longer is content (a file,
+        # a page, a listing) that only happens to pass through a tool result,
+        # and the patterns are quadratic on it: 60 KB blocked the event loop
+        # for ~2 s when measured. Data is never translated anyway.
         return text
     try:
         if _compiled is None:
