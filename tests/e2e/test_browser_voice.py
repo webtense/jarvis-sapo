@@ -411,9 +411,16 @@ async def test_the_mute_button_does_not_cover_the_settings_on_a_narrow_screen(st
             }
             """)
             assert overlaps == [], f"el botón MUTE tapa controles de Ajustes: {overlaps}"
-            # El botón de cerrar sigue a la vista y sin tapar.
-            close = await page.locator("#settings-close").bounding_box()
-            assert close is not None and close["y"] >= 0
+            # Arriba del todo, el botón de cerrar sigue a la vista y nada lo tapa.
+            reachable = await page.evaluate("""
+            () => {
+              document.getElementById('settings-panel-inner').scrollTop = 0;
+              const r = document.getElementById('settings-close').getBoundingClientRect();
+              const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+              return !!hit && !!hit.closest('#settings-close');
+            }
+            """)
+            assert reachable, "el botón de cerrar Ajustes no se alcanza"
         finally:
             await browser.close()
 
