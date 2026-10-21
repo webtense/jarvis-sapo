@@ -1,0 +1,9 @@
+{
+  "//": "EJEMPLO NO ACTIVO (enabled: false). Para usarlo, copia este fichero a data/jarvis/sapofit-alerts.json y pon enabled a true. Croac (el coach de SapoFit) escribe; JARVIS lo dice en voz alta con la frase fija 'Croac dice:', sin urgencia y sin dar nada al cerebro. Sin horas de silencio no se calla nada. Ver docs/sapofit.md.",
+  "enabled": false,
+  "kinds": ["WORKOUT_ANALYSIS", "DAILY_SUMMARY", "COACH_NUDGE"],
+  "poll_s": 60,
+  "max_per_hour": 6,
+  "quiet_hours": {"from": "23:00", "to": "08:00"},
+  "max_chars_spoken": 400
+}

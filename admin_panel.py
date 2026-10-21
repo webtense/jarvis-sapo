@@ -30,6 +30,7 @@ import json
 import os
 import shutil
 import stat
+from datetime import datetime
 from pathlib import Path
 
 import data_paths
@@ -198,7 +199,50 @@ def _google_status(servers: dict) -> dict:
     return out
 
 
-def connections_report(servers: dict, problems: list) -> dict:
+def _sapofit_status(servers: dict, running: bool) -> dict:
+    """SapoFit y el vigilante de Croac: si hay token, si el vigilante está
+    encendido y en marcha, y cuándo fue la última lectura. Nunca el token, ni
+    el camino, ni un texto de mensaje: el cursor es un identificador opaco."""
+    import data_paths
+    import sapofit_watch
+    token_file = os.environ.get("SAPOFIT_TOKEN_FILE", "").strip()
+    for entry in servers.values():
+        if not isinstance(entry, dict):
+            continue
+        candidate = _entry_env(entry).get("SAPOFIT_TOKEN_FILE")
+        if isinstance(candidate, str) and candidate.strip() and not token_file:
+            token_file = candidate.strip()
+    state = _token_file_state(token_file) if token_file else "missing"
+    try:
+        watch_enabled = sapofit_watch.load_config() is not None
+    except sapofit_watch.ConfigError:
+        watch_enabled = False
+    doc = {}
+    try:
+        path = data_paths.sapofit_cursor_path()
+        if path.stat().st_size <= 64 * 1024:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            doc = loaded if isinstance(loaded, dict) else {}
+    except (OSError, ValueError):
+        doc = {}
+    last = doc.get("last_read_at")
+    last_text = ""
+    if isinstance(last, (int, float)) and not isinstance(last, bool) and last > 0:
+        try:
+            last_text = datetime.fromtimestamp(last).isoformat(timespec="minutes")
+        except (OSError, OverflowError, ValueError):
+            last_text = ""
+    return {
+        "configured": state == "ok",
+        "token_file": state,
+        "watch_enabled": watch_enabled,
+        "watch_running": running,
+        "cursor": safe_text(doc.get("cursor"), 48),
+        "last_read_at": last_text,
+    }
+
+
+def connections_report(servers: dict, problems: list, sapofit_running: bool = False) -> dict:
     """Los servidores MCP declarados, sin una sola URL ni ruta.
 
     `servers` y `problems` los trae `server.declared_connections()`: este
@@ -223,6 +267,7 @@ def connections_report(servers: dict, problems: list) -> dict:
         "problems": [safe_text(p, 300) for p in problems[:MAX_PROBLEMS]],
         "home_assistant": _home_assistant_status(servers),
         "google": _google_status(servers),
+        "sapofit": _sapofit_status(servers, sapofit_running),
     }
 
 

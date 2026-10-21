@@ -135,6 +135,19 @@ def whatsapp_actions_log_path() -> Path:
     return brain_home() / "whatsapp-actions.log"
 
 
+def sapofit_alerts_path() -> Path:
+    """The user's switch and settings for Croac's spoken messages (see
+    `sapofit_watch.py`). His own file: JARVIS never creates or edits it, and
+    with no file the watcher does not run."""
+    return brain_home() / "sapofit-alerts.json"
+
+
+def sapofit_cursor_path() -> Path:
+    """Where the Croac watcher left off: the feed cursor and the ids it already
+    spoke. It holds no message text (see `sapofit_watch.py`)."""
+    return brain_home() / "sapofit-cursor.json"
+
+
 def ha_exclude_path() -> Path:
     """The user's Home Assistant exclusion list (see `ha_exclude.py`).
 

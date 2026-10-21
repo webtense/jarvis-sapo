@@ -36,7 +36,7 @@ SCRUBBED_ENV_KEYS = {"CLAUDECODE"}
 RUN_SCRUBBED_ENV_KEYS = {"HA_URL", "HA_TOKEN", "HA_TOKEN_FILE", "BTR_ACI_BASIC_AUTH",
                          "GOOGLE_TOKEN_FILE", "HA_ACTIONS_ALLOW_READ_TOKEN",
                          "EVOLUTION_TOKEN_FILE", "EVOLUTION_WRITE_TOKEN_FILE",
-                         "WHATSAPP_POLICY_FILE"}
+                         "WHATSAPP_POLICY_FILE", "SAPOFIT_TOKEN_FILE"}
 
 # The credential that CAN act on the house (docs/casa-control.md). Unlike the
 # read-only ones above it is used by the JARVIS server process itself, after

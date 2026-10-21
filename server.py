@@ -68,6 +68,7 @@ import actions
 import admin_panel
 import bridge
 import ha_watch
+import sapofit_watch
 import google_actions
 import whatsapp_actions
 import home_actions
@@ -1876,6 +1877,7 @@ async def lifespan(application: FastAPI):
     await start_brain_and_speech()
     await start_session_watcher()
     await start_home_watch()
+    await start_sapofit_watch()
     if tts.provider() in ("piper", "kokoro"):
         # Loading the voice is ~1.5 s; do it now rather than in the middle of
         # the first sentence. Off the loop, and never fatal.
@@ -1891,6 +1893,7 @@ async def lifespan(application: FastAPI):
 
     yield
 
+    await stop_sapofit_watch()
     await stop_home_watch()
     await stop_session_watcher()
     await stop_brain_and_speech()
@@ -7244,6 +7247,50 @@ async def stop_home_watch() -> None:
             pass
 
 
+# --- Croac's messages (sapofit_watch.py): opt-in, read only, never urgent
+
+_sapofit_watch_task: Optional[asyncio.Task] = None
+
+
+async def _sapofit_deliver(sentence: str) -> None:
+    text = i18n.t(sentence)
+    if speech is not None and voice_clients:
+        bridge_state.note_other_speech()
+        await speech.say(text, Priority.LOW)       # batched, at a pause, never over him
+        return
+    await _bridge_notify_fallback("Croac", text)
+
+
+async def start_sapofit_watch() -> None:
+    """Start the coach watch only if the user switched it on in
+    sapofit-alerts.json AND pointed SAPOFIT_TOKEN_FILE at his token. Never
+    fatal, and never speaks the history: the first poll only records the cursor."""
+    global _sapofit_watch_task
+    if not os.environ.get("SAPOFIT_TOKEN_FILE", "").strip():
+        log.info("coach watch off: no SAPOFIT_TOKEN_FILE")
+        return
+    try:
+        config = sapofit_watch.load_config()
+    except sapofit_watch.ConfigError as e:
+        log.info("coach watch off: %s", e)
+        return
+    watcher = sapofit_watch.Watcher(config, sapofit_watch.load_state(),
+                                    prepare=strip_markdown_for_tts)
+    _sapofit_watch_task = asyncio.create_task(sapofit_watch.run(watcher, _sapofit_deliver))
+    log.info("coach watch on: every %ds", sapofit_watch.effective_poll_s(config))
+
+
+async def stop_sapofit_watch() -> None:
+    global _sapofit_watch_task
+    task, _sapofit_watch_task = _sapofit_watch_task, None
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
 @app.websocket("/ws/sessions")
 async def ws_sessions(websocket: WebSocket):
     await websocket.accept()
@@ -8293,7 +8340,8 @@ async def api_admin_connections():
     """
     declared = await asyncio.to_thread(declared_connections)
     report = await asyncio.to_thread(
-        admin_panel.connections_report, declared.servers, declared.problems)
+        admin_panel.connections_report, declared.servers, declared.problems,
+        _sapofit_watch_task is not None)
     targets = admin_panel.remote_probe_urls(declared.servers)
     probed = {}
     for name in list(targets)[:ADMIN_MAX_PROBES]:
