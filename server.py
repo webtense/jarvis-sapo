@@ -7285,6 +7285,9 @@ async def api_settings_status():
         "claude_code_installed": claude_installed,
         "server_port": 8340,
         "uptime_seconds": int(time.time() - _session_start),
+        # Which voice answers right now ("fish" | "piper" | "none"): the panel
+        # shows it, and only "none" makes the Fish key a problem to fix.
+        "voice_provider": tts.provider(),
         "env_keys_set": {
             "fish_audio": bool(env_dict.get("FISH_API_KEY", "").strip() and env_dict.get("FISH_API_KEY", "") != "your-fish-audio-api-key-here"),
             "fish_voice_id": bool(env_dict.get("FISH_VOICE_ID", "").strip()),

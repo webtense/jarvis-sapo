@@ -8,6 +8,7 @@
 import { createOrb, type OrbState } from "./orb";
 import { createVoiceInput, createAudioPlayer, createMicMonitor } from "./voice";
 import { createSocket } from "./ws";
+import { t } from "./i18n";
 import { openSettings, checkFirstTimeSetup } from "./settings";
 import "./style.css";
 
@@ -33,8 +34,8 @@ function showError(msg: string) {
 function updateStatus(state: State) {
   const labels: Record<State, string> = {
     idle: "",
-    listening: "listening...",
-    thinking: "thinking...",
+    listening: t("listening..."),
+    thinking: t("thinking..."),
     speaking: "",
     compacting: "",          // the notice banner carries the words; the orb carries the state
   };
@@ -107,7 +108,7 @@ const voiceInput = createVoiceInput(
 // "is it even hearing me?" without a log, a console or anyone to ask.
 const micDot = document.createElement("div");
 micDot.id = "mic-level";
-micDot.title = "microphone input";
+micDot.title = t("microphone input");
 document.body.appendChild(micDot);
 
 const micMonitor = createMicMonitor(
@@ -137,8 +138,8 @@ const micMonitor = createMicMonitor(
 const hushBtn = document.createElement("button");
 hushBtn.id = "hush";
 hushBtn.type = "button";
-hushBtn.textContent = "Stop";
-hushBtn.title = "Stop speaking (Esc)";
+hushBtn.textContent = t("Stop");
+hushBtn.title = t("Stop speaking (Esc)");
 hushBtn.hidden = true;
 document.body.appendChild(hushBtn);
 
@@ -164,7 +165,7 @@ audioPlayer.onPlayed((utt, idx) => {
 audioPlayer.onFinished(() => {});
 
 audioPlayer.onNeedsGesture(() => {
-  showError("Click anywhere to enable audio");
+  showError(t("Click anywhere to enable audio"));
 });
 
 // ---------------------------------------------------------------------------
@@ -269,13 +270,13 @@ document.addEventListener("click", () => {
 btnRestart.addEventListener("click", async (e) => {
   e.stopPropagation();
   menuDropdown.style.display = "none";
-  statusEl.textContent = "restarting...";
+  statusEl.textContent = t("restarting...");
   try {
     await fetch("/api/restart", { method: "POST" });
     // Wait a few seconds then reload
     setTimeout(() => window.location.reload(), 4000);
   } catch {
-    statusEl.textContent = "restart failed";
+    statusEl.textContent = t("restart failed");
   }
 });
 
@@ -284,7 +285,7 @@ btnFixSelf.addEventListener("click", (e) => {
   menuDropdown.style.display = "none";
   // Activate work mode on the WebSocket session (JARVIS becomes Claude Code's voice)
   // Milestone 1 has no tools yet; "Fix yourself" returns as a brain tool later.
-  statusEl.textContent = "fix-yourself is not available in this build";
+  statusEl.textContent = t("fix-yourself is not available in this build");
 });
 
 // Settings button

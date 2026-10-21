@@ -30,6 +30,7 @@ import {
   listSessions, getUsageSessions,
   type SessionRow, type SessionUsage, type AgentUsage,
 } from "./api";
+import { t, tp, loc, unit, ago, fmtFixed } from "../i18n";
 import { connectSessionsLive } from "./sessions-live";
 import {
   el, row, panel, group, stack, kv, button, callout, splitView,
@@ -88,38 +89,38 @@ function now(): number {
 function fmtShort(sinceSec: number | null): string {
   if (sinceSec === null) return "—";
   const secs = Math.max(0, Math.round(now() - sinceSec));
-  if (secs < 60) return `${secs}s`;
+  if (secs < 60) return unit(secs, "s");
   const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m`;
+  if (mins < 60) return unit(mins, "m");
   const hours = Math.floor(mins / 60);
-  if (hours < 48) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
+  if (hours < 48) return unit(hours, "h");
+  return unit(Math.floor(hours / 24), "d");
 }
 
 /** "51m", "4h 12m", "3d 6h" — the readable form, for the detail panel. */
 function fmtSpan(secs: number): string {
   const s = Math.max(0, Math.round(secs));
-  if (s < 60) return `${s}s`;
+  if (s < 60) return unit(s, "s");
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
+  if (m < 60) return unit(m, "m");
   const h = Math.floor(m / 60);
-  if (h < 48) return m % 60 ? `${h}h ${m % 60}m` : `${h}h`;
+  if (h < 48) return m % 60 ? `${unit(h, "h")} ${unit(m % 60, "m")}` : unit(h, "h");
   const d = Math.floor(h / 24);
-  return h % 24 ? `${d}d ${h % 24}h` : `${d}d`;
+  return h % 24 ? `${unit(d, "d")} ${unit(h % 24, "h")}` : unit(d, "d");
 }
 
 function fmtClock(epochSec: number): string {
   const d = new Date(epochSec * 1000);
-  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const time = d.toLocaleTimeString(loc(), { hour: "numeric", minute: "2-digit" });
   if (d.toDateString() === new Date().toDateString()) return time;
-  return `${d.toLocaleDateString([], { day: "numeric", month: "short" })} ${time}`;
+  return `${d.toLocaleDateString(loc(), { day: "numeric", month: "short" })} ${time}`;
 }
 
 /** 812 · 12.4k · 3.1M. Tabular everywhere it is rendered. */
 function fmtCount(n: number): string {
   if (n < 1000) return String(n);
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
-  return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n < 1_000_000) return `${fmtFixed(n / 1000, n < 10_000 ? 1 : 0)}k`;
+  return `${fmtFixed(n / 1_000_000, 1)}M`;
 }
 
 function oneLine(text: string): string {
@@ -217,20 +218,20 @@ function sessionRow(s: SessionRow, opts: { showProject?: boolean } = {}): HTMLEl
   // coin-flip. Only the two verdicts that carry information are drawn —
   // "background" is what a row without a badge already means.
   if (s.primary) {
-    r.addTrail(pill("main", "accent"));
+    r.addTrail(pill(t("main"), "accent"));
   } else if (s.primary_reason === "equally live as another here") {
-    r.addTrail(pill("equally live", "warn", "ghost"));
+    r.addTrail(pill(t("equally live"), "warn", "ghost"));
   }
   if (s.primary_reason) r.root.dataset.primaryReason = s.primary_reason;
 
   if (s.agents_active > 0) {
     r.addTrail(pill(
-      `${agentsActive(s)} agent${s.agents_active === 1 && !s.agents_capped
-        ? "" : "s"}`, "accent"));
+      tp(s.agents_capped ? 2 : s.agents_active, "{count} agent", "{count} agents",
+         { count: agentsActive(s) }), "accent"));
   }
-  if (!s.steerable) r.addTrail(pill("no steer", "warn", "ghost"));
+  if (!s.steerable) r.addTrail(pill(t("no steer"), "warn", "ghost"));
   // "— ago" would be a sentence about a measurement that does not exist.
-  r.addMeta(s.since === null ? "no stamp" : `${fmtShort(s.since)} ago`,
+  r.addMeta(s.since === null ? t("no stamp") : ago(fmtShort(s.since)),
             { cls: "sess-when" });
 
   // The alarm, and only the alarm, keeps a body in the list.
@@ -245,10 +246,14 @@ function sortSessions(rows: SessionRow[]): SessionRow[] {
     || (a.since ?? 0) - (b.since ?? 0));
 }
 
+/** The key of the group for sessions with no project. Compared as data
+ * (grouping) and translated only where it is drawn. */
+const UNKNOWN_PROJECT = "(unknown)";
+
 function groupByProject(rows: SessionRow[]): [string, SessionRow[]][] {
   const map = new Map<string, SessionRow[]>();
   for (const s of rows) {
-    const key = s.project || "(unknown)";
+    const key = s.project || UNKNOWN_PROJECT;
     const list = map.get(key);
     if (list) list.push(s); else map.set(key, [s]);
   }
@@ -270,13 +275,14 @@ function projectGroup(project: string, rows: SessionRow[]): HTMLElement {
   const active = sorted.filter((s) => s.state !== "fresh");
   const fresh = sorted.filter((s) => s.state === "fresh");
 
-  const g = group(project, String(rows.length));
+  const g = group(project === UNKNOWN_PROJECT ? t(UNKNOWN_PROJECT) : project,
+                  String(rows.length));
   for (const s of active) g.body.append(sessionRow(s));
-  if (active.length === 0) g.body.append(emptyState("Nothing but fresh sessions.", true));
+  if (active.length === 0) g.body.append(emptyState(t("Nothing but fresh sessions."), true));
 
   if (fresh.length > 0) {
     const details = el("details", "fresh-group");
-    const summary = el("summary", undefined, `${fresh.length} fresh (never prompted)`);
+    const summary = el("summary", undefined, t("{n} fresh (never prompted)", { n: fresh.length }));
     details.append(summary);
     details.open = freshOpen.has(project);
     details.addEventListener("toggle", () => {
@@ -304,7 +310,10 @@ function projectGroup(project: string, rows: SessionRow[]): HTMLElement {
  */
 function askBand(s: SessionRow): HTMLElement {
   const style = stateStyle(s.state);
-  const ask = ASK[s.state] ?? { label: style.label, line: "" };
+  const found = ASK[s.state];
+  const ask = found
+    ? { label: t(found.label), line: t(found.line) }
+    : { label: style.label, line: "" };
   const needsYou = s.state === "needs_you";
 
   const c = callout({
@@ -312,7 +321,7 @@ function askBand(s: SessionRow): HTMLElement {
     label: ask.label,
     lead: statusDot(s.state),
     loud: needsYou,
-    meta: s.since === null ? "" : `${SINCE_LABEL[s.state] ?? "for"} ${fmtSpan(now() - s.since)}`,
+    meta: s.since === null ? "" : `${t(SINCE_LABEL[s.state] ?? "for")} ${fmtSpan(now() - s.since)}`,
   });
 
   if (!needsYou) {
@@ -322,25 +331,25 @@ function askBand(s: SessionRow): HTMLElement {
   } else if (s.last_text) {
     c.body.textContent = oneLine(s.last_text);
     c.foot.append(el("span", "callout-note",
-      "No reason recorded — that is the last thing it said."));
+      t("No reason recorded — that is the last thing it said.")));
     c.foot.hidden = false;
   } else {
-    c.body.textContent = "It has stopped and has not said why.";
+    c.body.textContent = t("It has stopped and has not said why.");
   }
 
   if (needsYou) {
     if (s.needs_a_human_hand) {
-      c.foot.prepend(pill("your keystroke", "bad"));
+      c.foot.prepend(pill(t("your keystroke"), "bad"));
       c.foot.append(el("span", "callout-note",
-        "JARVIS cannot answer this one — it wants a key pressed in that terminal."));
+        t("JARVIS cannot answer this one — it wants a key pressed in that terminal.")));
     } else if (s.steerable) {
-      c.foot.prepend(pill("steerable", "ok", "ghost"));
+      c.foot.prepend(pill(t("steerable"), "ok", "ghost"));
       c.foot.append(el("span", "callout-note",
-        "JARVIS can reply to this one over its inbox socket."));
+        t("JARVIS can reply to this one over its inbox socket.")));
     } else {
-      c.foot.prepend(pill("no inbox socket", "warn", "ghost"));
+      c.foot.prepend(pill(t("no inbox socket"), "warn", "ghost"));
       c.foot.append(el("span", "callout-note",
-        "Nothing can reach this one but the terminal it is in."));
+        t("Nothing can reach this one but the terminal it is in.")));
     }
     c.foot.hidden = false;
   }
@@ -360,24 +369,24 @@ function quote(text: string, title = false): HTMLElement {
 
 /** What it is working on, in the words of the transcript itself. */
 function doingPanel(s: SessionRow): HTMLElement {
-  const p = panel("What It Is Doing");
+  const p = panel(t("What It Is Doing"));
   const parts: HTMLElement[] = [];
 
-  if (s.title) parts.push(block("Its own title for this", quote(s.title, true)));
-  if (s.last_prompt) parts.push(block("You last asked", quote(oneLine(s.last_prompt))));
-  if (s.last_text) parts.push(block("It last said", quote(oneLine(s.last_text))));
+  if (s.title) parts.push(block(t("Its own title for this"), quote(s.title, true)));
+  if (s.last_prompt) parts.push(block(t("You last asked"), quote(oneLine(s.last_prompt))));
+  if (s.last_text) parts.push(block(t("It last said"), quote(oneLine(s.last_text))));
 
   if (s.recent_tools.length > 0) {
     const pills = el("div", "sd-pills");
     for (const t of s.recent_tools) pills.append(pill(t, "idle", "ghost"));
-    parts.push(block("Last tools it reached for", pills));
+    parts.push(block(t("Last tools it reached for"), pills));
   }
 
   if (parts.length === 0) {
     p.body.append(emptyState(
       s.state === "fresh"
-        ? "No transcript exists for this session — nobody has prompted it."
-        : "Its transcript holds nothing readable yet."));
+        ? t("No transcript exists for this session — nobody has prompted it.")
+        : t("Its transcript holds nothing readable yet.")));
   } else {
     for (const part of parts) p.body.append(part);
   }
@@ -425,56 +434,58 @@ function agentsActive(s: SessionRow): string {
 
 function agentsPanel(s: SessionRow): HTMLElement {
   const seen = s.agents_capped ? `${s.agents_seen}+` : String(s.agents_seen);
-  const p = panel("Under It", {
+  const p = panel(t("Under It"), {
     meta: s.agents_seen > 0 ? seen : "",
     tone: s.agents_active > 0 ? "accent" : undefined,
   });
 
   if (s.agents_seen === 0) {
-    p.body.append(emptyState("No subagent transcripts under this conversation."));
+    p.body.append(emptyState(t("No subagent transcripts under this conversation.")));
     return p.root;
   }
 
   const line = el("div", "sd-block");
   const pills = el("div", "sd-pills");
   pills.append(
-    pill(`${agentsActive(s)} active`, s.agents_active > 0 ? "accent" : "idle"),
-    pill(`${seen} dispatched`, "idle", "ghost"),
+    pill(t("{n} active", { n: agentsActive(s) }), s.agents_active > 0 ? "accent" : "idle"),
+    pill(t("{n} dispatched", { n: seen }), "idle", "ghost"),
   );
   line.append(pills, el("div", "sd-agent-note",
-    `"Active" means a transcript written in the last ${AGENT_ACTIVE_SEC} seconds. `
-    + "It is a file age, not a live process — there is no process here to check."
+    t("\"Active\" means a transcript written in the last {seconds} seconds. "
+      + "It is a file age, not a live process — there is no process here to check.",
+      { seconds: AGENT_ACTIVE_SEC })
     + (s.agents_capped
-      ? ` Both counts hit the watcher's cap of ${s.agents_seen} files, so both`
+      ? " " + t("Both counts hit the watcher's cap of {files} files, so both"
         + " are floors, not totals — the cap is taken in file-name order,"
-        + " which has nothing to do with which agents are busy."
+        + " which has nothing to do with which agents are busy.",
+        { files: s.agents_seen })
       : "")));
   p.body.append(line);
 
   const measured = usage?.get(s.session_id);
   if (usage === undefined) {
-    p.body.append(emptyState("Reading the transcripts…", true));
+    p.body.append(emptyState(t("Reading the transcripts…"), true));
     return p.root;
   }
   if (!measured) {
-    p.body.append(emptyState(
+    p.body.append(emptyState(t(
       "Not measured — the transcript scan has not read this session, so "
-      + "there is nothing to say about the agents individually.", true));
+      + "there is nothing to say about the agents individually."), true));
     return p.root;
   }
 
   const agents = [...measured.agents].sort((a, b) =>
     Number(b.active) - Number(a.active) || (b.last_at ?? 0) - (a.last_at ?? 0));
   if (agents.length === 0) {
-    p.body.append(emptyState("The scan found no agent transcripts to read.", true));
+    p.body.append(emptyState(t("The scan found no agent transcripts to read."), true));
     return p.root;
   }
   const list = stack();
   for (const a of agents.slice(0, MAX_AGENT_ROWS)) list.append(agentRow(a));
-  p.body.append(block("Agents, most recent first", list));
+  p.body.append(block(t("Agents, most recent first"), list));
   if (agents.length > MAX_AGENT_ROWS) {
     p.body.append(el("div", "sd-agent-note",
-      `${agents.length - MAX_AGENT_ROWS} more not shown.`));
+      t("{n} more not shown.", { n: agents.length - MAX_AGENT_ROWS })));
   }
   return p.root;
 }
@@ -489,45 +500,46 @@ function agentsPanel(s: SessionRow): HTMLElement {
  * never as a zero.
  */
 function sessionPanel(s: SessionRow): HTMLElement {
-  const p = panel("The Session");
+  const p = panel(t("The Session"));
   const fields = kv();
 
-  const sinceKey = `in this state`;
-  fields.add(sinceKey, s.since === null ? "not recorded"
-    : `${fmtSpan(now() - s.since)} · since ${fmtClock(s.since)}`,
+  const sinceKey = t("in this state");
+  fields.add(sinceKey, s.since === null ? t("not recorded")
+    : `${fmtSpan(now() - s.since)} · ${t("since {when}", { when: fmtClock(s.since) })}`,
     s.since === null ? "dim" : undefined);
-  fields.add("session age", s.started === null ? "not recorded"
-    : `${fmtSpan(now() - s.started)} · started ${fmtClock(s.started)}`,
+  fields.add(t("session age"), s.started === null ? t("not recorded")
+    : `${fmtSpan(now() - s.started)} · ${t("started {when}", { when: fmtClock(s.started) })}`,
     s.started === null ? "dim" : undefined);
 
-  fields.add("project", s.project || "(unknown)");
-  fields.add("folder", s.cwd || "(unknown)");
-  fields.add("started as", s.origin);
-  fields.add("steerable", s.steerable
-    ? "yes — it bound an inbox socket"
-    : "no — no inbox socket to reach it on", s.steerable ? "ok" : "warn");
+  fields.add(t("project"), s.project || t("(unknown)"));
+  fields.add(t("folder"), s.cwd || t("(unknown)"));
+  fields.add(t("started as"), s.origin);
+  fields.add(t("steerable"), s.steerable
+    ? t("yes — it bound an inbox socket")
+    : t("no — no inbox socket to reach it on"), s.steerable ? "ok" : "warn");
   // The verdict AND the watcher's own reason for it. A bare boolean is a
   // claim; the reason is what lets a reader check it.
-  fields.add("main here", s.primary ? "yes" : "no");
-  if (s.primary_reason) fields.add("because", s.primary_reason);
+  fields.add(t("main here"), s.primary ? t("yes") : t("no"));
+  if (s.primary_reason) fields.add(t("because"), s.primary_reason);
 
   const measured = usage?.get(s.session_id);
   if (measured) {
     // The LAST turn's carried context, not the sum of every turn. Null when
     // the transcript holds no assistant turn at all: unknown, not zero.
-    fields.add("context carried", measured.context_tokens === null
-      ? "not measured"
-      : `${fmtCount(measured.context_tokens)} tok on its last turn`,
+    fields.add(t("context carried"), measured.context_tokens === null
+      ? t("not measured")
+      : t("{count} tok on its last turn", { count: fmtCount(measured.context_tokens) }),
       measured.context_tokens === null ? "dim" : undefined);
-    fields.add("turns", String(measured.turns));
+    fields.add(t("turns"), String(measured.turns));
   }
 
   p.body.append(fields.root);
-  p.body.append(block("Session id", el("div", "sd-id", s.session_id)));
+  p.body.append(block(t("Session id"), el("div", "sd-id", s.session_id)));
   if (s.pids.length > 0) {
     p.body.append(el("div", "sd-agent-note",
-      `${s.pids.length === 1 ? "Process" : "Processes"} ${s.pids.join(", ")}`
-      + (s.primary_pid !== null ? ` · steered through ${s.primary_pid}` : "")));
+      `${tp(s.pids.length, "Process", "Processes")} ${s.pids.join(", ")}`
+      + (s.primary_pid !== null
+        ? ` · ${t("steered through {pid}", { pid: s.primary_pid })}` : "")));
   }
   return p.root;
 }
@@ -536,15 +548,15 @@ function detailFor(s: SessionRow): HTMLElement {
   const wrap = el("div", "sd");
 
   const head = el("div", "sd-head");
-  const close = button("Close", () => select(null), { quiet: true });
-  close.title = "Close (Esc)";
+  const close = button(t("Close"), () => select(null), { quiet: true });
+  close.title = t("Close (Esc)");
   head.append(statusDot(s.state), el("h2", "sd-name", s.voice_name), close);
 
   const where = el("div", "sd-where");
-  where.append(el("span", undefined, s.project || "(unknown project)"));
-  if (s.primary) where.append(pill("main here", "accent"));
+  where.append(el("span", undefined, s.project || t("(unknown project)")));
+  if (s.primary) where.append(pill(t("main here"), "accent"));
   else if (s.primary_reason === "equally live as another here") {
-    where.append(pill("equally live", "warn", "ghost"));
+    where.append(pill(t("equally live"), "warn", "ghost"));
   }
   where.append(pill(s.origin, "idle", "ghost"));
   head.append(where);
@@ -557,10 +569,10 @@ function detailFor(s: SessionRow): HTMLElement {
  * dead space: it is the tally the list would otherwise make you count. */
 function glance(): HTMLElement {
   const wrap = el("div", "sd");
-  const p = panel("At a Glance", { meta: sessions.length > 0 ? String(sessions.length) : "" });
+  const p = panel(t("At a Glance"), { meta: sessions.length > 0 ? String(sessions.length) : "" });
 
   if (sessions.length === 0) {
-    p.body.append(emptyState("No Claude Code conversations on this machine."));
+    p.body.append(emptyState(t("No Claude Code conversations on this machine.")));
     wrap.append(p.root);
     return wrap;
   }
@@ -581,7 +593,7 @@ function glance(): HTMLElement {
   }
   p.body.append(list);
   p.body.append(el("div", "sd-agent-note",
-    "Pick one for what it is doing, whether it wants you, and why."));
+    t("Pick one for what it is doing, whether it wants you, and why.")));
   wrap.append(p.root);
   return wrap;
 }
@@ -649,7 +661,7 @@ function paint(): void {
 
   byProjectPanel.setMeta(sessions.length > 0 ? String(sessions.length) : "");
   if (sessions.length === 0) {
-    byProjectPanel.body.replaceChildren(emptyState("No sessions found."));
+    byProjectPanel.body.replaceChildren(emptyState(t("No sessions found.")));
   } else {
     const groups = document.createDocumentFragment();
     for (const [project, rows] of groupByProject(sessions)) {
@@ -708,9 +720,9 @@ function paintTakenAt(): void {
     showSessionsBanner(null);
     return;
   }
-  showSessionsBanner(
-    `This is a reading from ${fmtShort(takenAt)} ago — the watcher has not `
-    + "polled since. What is below may have moved.");
+  showSessionsBanner(t(
+    "This is a reading from {age} — the watcher has not "
+    + "polled since. What is below may have moved.", { age: ago(fmtShort(takenAt)) }));
 }
 
 async function reconcile(): Promise<void> {
@@ -723,7 +735,7 @@ async function reconcile(): Promise<void> {
     paintTakenAt();
   } catch (e) {
     console.error("[sessions] reconcile failed", e);
-    showSessionsBanner("Cannot reach the JARVIS server.");
+    showSessionsBanner(t("Cannot reach the JARVIS server."));
   }
 }
 
@@ -753,9 +765,9 @@ function build(): void {
   // wears the same primitive class.
   split.detail.id = "sessions-detail";
 
-  needsPanel = panel("Needs You", { tone: "bad", alert: true, meta: "0" });
+  needsPanel = panel(t("Needs You"), { tone: "bad", alert: true, meta: "0" });
   needsPanel.root.hidden = true;
-  byProjectPanel = panel("Sessions by Project");
+  byProjectPanel = panel(t("Sessions by Project"));
   split.master.append(needsPanel.root, byProjectPanel.root);
 
   view.replaceChildren(banner, split.root);
@@ -773,7 +785,7 @@ export function initSessions(): void {
     onReconcile: () => void reconcile(),
     onSessionEvent,
     onConnectionChange: (connected) => {
-      if (!connected) showSessionsBanner("Reconnecting to JARVIS…");
+      if (!connected) showSessionsBanner(t("Reconnecting to JARVIS…"));
     },
   });
 

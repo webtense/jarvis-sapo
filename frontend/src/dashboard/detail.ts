@@ -9,6 +9,7 @@ import {
   getRun, getEvents, cancelRun, retryRun,
   type RunRow, type RunEvent,
 } from "./api";
+import { t, unit, fmtFixed } from "../i18n";
 import { el, button, statusDot, statusPill, emptyState, setTone } from "./ui";
 
 const MAX_RENDERED = 200;
@@ -39,7 +40,7 @@ function isActive(run: RunRow): boolean {
 
 function elapsedText(run: RunRow): string {
   if (!run.started_at) return "—";
-  return `${Math.round((run.ended_at ?? Date.now() / 1000) - run.started_at)}s`;
+  return unit(Math.round((run.ended_at ?? Date.now() / 1000) - run.started_at), "s");
 }
 
 /** The CLI's cost figure, labelled for what it is. Nothing was billed: the
@@ -47,17 +48,18 @@ function elapsedText(run: RunRow): string {
  * every ANTHROPIC_* variable so it cannot do otherwise. It is kept as a
  * comparable measure of size, never as money spent. */
 function costText(run: RunRow): string {
-  return run.cost_usd > 0 ? `$${run.cost_usd.toFixed(4)} if billed` : "—";
+  return run.cost_usd > 0
+    ? t("{cost} if billed", { cost: `$${fmtFixed(run.cost_usd, 4)}` }) : "—";
 }
 
 function bindAction(btn: HTMLButtonElement, run: RunRow): void {
   if (actionHandler) btn.removeEventListener("click", actionHandler);
   if (isActive(run)) {
-    btn.textContent = "Cancel";
+    btn.textContent = t("Cancel");
     setTone(btn, "bad");
     actionHandler = () => void cancelRun(run.id);
   } else {
-    btn.textContent = "Retry";
+    btn.textContent = t("Retry");
     setTone(btn, "accent");
     actionHandler = () => void retryRun(run.id);
   }
@@ -211,7 +213,7 @@ export async function openDetail(runId: string): Promise<void> {
   try {
     run = await getRun(runId);
   } catch {
-    host.append(emptyState("Could not load this run."));
+    host.append(emptyState(t("Could not load this run.")));
     return;
   }
 
@@ -222,14 +224,14 @@ export async function openDetail(runId: string): Promise<void> {
   const head = el("header", "pane-head");
   dotSlot = statusDot(run.status);
   statusSlot = statusPill(run.status);
-  const close = button("Close", closeDetail, { quiet: true });
+  const close = button(t("Close"), closeDetail, { quiet: true });
   close.classList.add("pane-close");
   head.append(dotSlot, el("h2", "pane-title", run.project_name), statusSlot, close);
 
   const body = el("div", "pane-body");
 
-  const [elapsedDt, elapsedDdEl] = field("elapsed", elapsedText(run));
-  const [costDt, costDdEl] = field("api equivalent", costText(run));
+  const [elapsedDt, elapsedDdEl] = field(t("elapsed"), elapsedText(run));
+  const [costDt, costDdEl] = field(t("api equivalent"), costText(run));
   elapsedDd = elapsedDdEl;
   costDd = costDdEl;
 
@@ -237,11 +239,13 @@ export async function openDetail(runId: string): Promise<void> {
   dl.append(
     elapsedDt, elapsedDdEl,
     costDt, costDdEl,
-    ...field("tokens", `in ${run.input_tokens} / out ${run.output_tokens} / cache ${run.cache_read_tokens}`),
-    ...field("model", run.model || "—"),
-    ...field("session", run.id),
+    ...field(t("tokens"), t("in {input} / out {output} / cache {cache}", {
+      input: run.input_tokens, output: run.output_tokens, cache: run.cache_read_tokens,
+    })),
+    ...field(t("model"), run.model || "—"),
+    ...field(t("session"), run.id),
   );
-  if (run.error) dl.append(...field("error", run.error));
+  if (run.error) dl.append(...field(t("error"), run.error));
 
   const action = document.createElement("button");
   action.type = "button";
@@ -277,7 +281,7 @@ export async function openDetail(runId: string): Promise<void> {
     console.error("[detail] transcript fetch failed", e);
     if (runId !== currentRunId) return;
     transcript.replaceChildren(
-      emptyState("Could not load this run's transcript."));
+      emptyState(t("Could not load this run's transcript.")));
     return;
   }
 
@@ -288,19 +292,19 @@ export async function openDetail(runId: string): Promise<void> {
   if (total === 0) {
     transcript.append(emptyState(
       isActive(run)
-        ? "Waiting for the first event…"
-        : "No events recorded for this run.",
+        ? t("Waiting for the first event…")
+        : t("No events recorded for this run."),
       true,
     ));
   }
 }
 
 function loadEarlierButton(runId: string, before: number): HTMLElement {
-  const idleLabel = `Load earlier (${before} more)`;
+  const idleLabel = t("Load earlier ({n} more)", { n: before });
   const btn = button(idleLabel, () => {
     // Disable before anything async so a double-click can't fire this twice.
     btn.disabled = true;
-    btn.textContent = "Loading…";
+    btn.textContent = t("Loading…");
     const from = Math.max(0, before - MAX_RENDERED);
     getEvents(runId, from, before - from)
       .then(({ events }) => {

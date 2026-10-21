@@ -9,6 +9,7 @@ import {
   listRuns, getStats, getUsageLimits,
   type RunRow, type UsageSnapshot,
 } from "./api";
+import { t, tp, loc, unit, ago, fmtFixed } from "../i18n";
 import { connectLive } from "./live";
 import { openDetail, appendEvent, notifyRunChanged } from "./detail";
 import { summaryFor, noteEvent } from "./nowline";
@@ -36,14 +37,14 @@ function fmtDuration(run: RunRow): string {
   if (!run.started_at) return "—";
   const end = run.ended_at ?? Date.now() / 1000;
   const secs = Math.max(0, Math.round(end - run.started_at));
-  return `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, "0")}s`;
+  return `${unit(Math.floor(secs / 60), "m")} ${unit(String(secs % 60).padStart(2, "0"), "s")}`;
 }
 
 /** 812 · 12.4k · 3.1M. Tabular, so a ticking number doesn't shove the column. */
 function fmtCount(n: number): string {
   if (n < 1000) return String(n);
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
-  return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n < 1_000_000) return `${fmtFixed(n / 1000, n < 10_000 ? 1 : 0)}k`;
+  return `${fmtFixed(n / 1_000_000, 1)}M`;
 }
 
 /** What a run actually consumed. Not dollars: JARVIS runs on the user's
@@ -56,13 +57,13 @@ function fmtRunTokens(run: RunRow): string {
 
 function fmtClock(epochSec: number): string {
   return new Date(epochSec * 1000)
-    .toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    .toLocaleTimeString(loc(), { hour: "2-digit", minute: "2-digit" });
 }
 
 /** "4:20pm" — the same clock a person would say out loud. */
 function fmtTime(d: Date): string {
   return d
-    .toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    .toLocaleTimeString(loc(), { hour: "numeric", minute: "2-digit" })
     .replace(/\s?([AaPp])\.?[Mm]\.?$/, (_m, half: string) => `${half.toLowerCase()}m`);
 }
 
@@ -72,17 +73,17 @@ function fmtWhen(epochSec: number, now = new Date()): string {
   if (d.toDateString() === now.toDateString()) return fmtTime(d);
   const days = (d.getTime() - now.getTime()) / 86_400_000;
   if (days > 0 && days < 6) {
-    return `${d.toLocaleDateString([], { weekday: "short" })} ${fmtTime(d)}`;
+    return `${d.toLocaleDateString(loc(), { weekday: "short" })} ${fmtTime(d)}`;
   }
-  return `${d.toLocaleDateString([], { day: "numeric", month: "short" })} ${fmtTime(d)}`;
+  return `${d.toLocaleDateString(loc(), { day: "numeric", month: "short" })} ${fmtTime(d)}`;
 }
 
 /** How long ago a reading was taken, in words. */
 function fmtAge(sec: number): string {
-  if (sec < 45) return "just now";
-  if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
-  if (sec < 36 * 3600) return `${Math.round(sec / 3600)}h ago`;
-  return `${Math.round(sec / 86_400)}d ago`;
+  if (sec < 45) return t("just now");
+  if (sec < 3600) return ago(unit(Math.round(sec / 60), "m"));
+  if (sec < 36 * 3600) return ago(unit(Math.round(sec / 3600), "h"));
+  return ago(unit(Math.round(sec / 86_400), "d"));
 }
 
 /** The CLI's own courtesy warning fires at 75% of a window; past 90% the next
@@ -137,11 +138,11 @@ function mastheadEnsured(): Masthead | null {
   if (!host) return null;
 
   // Zone 1 — the limits.
-  const usagePill = pill("no reading", "warn");
+  const usagePill = pill(t("no reading"), "warn");
   usagePill.hidden = true;
   const usageNote = el("span", "stat-zone-note");
   const usageHead = el("div", "stat-zone-head");
-  usageHead.append(el("span", "stat-zone-title", "Subscription"), usagePill, usageNote);
+  usageHead.append(el("span", "stat-zone-title", t("Subscription")), usagePill, usageNote);
   const usageGauges = el("div", "usage-gauges");
   const limits = el("section", "stat-zone");
   limits.append(usageHead, usageGauges);
@@ -149,20 +150,20 @@ function mastheadEnsured(): Masthead | null {
   // Zone 2 — now, then today.
   const nowDot = el("span", "dot dot--void tone-idle");
   nowDot.setAttribute("aria-hidden", "true");
-  const nowText = el("span", undefined, "no runs yet");
+  const nowText = el("span", undefined, t("no runs yet"));
   const nowRoot = el("div", "stat-now tone-idle");
   nowRoot.append(nowDot, nowText);
-  const attn = pill("0 need you", "bad");
+  const attn = pill(tp(0, "{n} needs you", "{n} need you"), "bad");
   attn.hidden = true;
 
   const cells = {
-    runs: readout("Runs", "0", { size: "sm" }),
-    ok: readout("Succeeded", "0", { size: "sm" }),
-    bad: readout("Failed", "0", { size: "sm", tone: "dim" }),
-    tokens: readout("Tokens", "0", { size: "sm" }),
+    runs: readout(t("Runs"), "0", { size: "sm" }),
+    ok: readout(t("Succeeded"), "0", { size: "sm" }),
+    bad: readout(t("Failed"), "0", { size: "sm", tone: "dim" }),
+    tokens: readout(t("Tokens"), "0", { size: "sm" }),
   };
   const todayHead = el("div", "stat-zone-head");
-  todayHead.append(el("span", "stat-zone-title", "Today"), nowRoot, attn);
+  todayHead.append(el("span", "stat-zone-title", t("Today")), nowRoot, attn);
   const figures = el("div", "stat-figures");
   figures.append(cells.runs.root, cells.ok.root, cells.bad.root, cells.tokens.root);
   const today = el("section", "stat-zone");
@@ -197,11 +198,11 @@ function renderUsage(snap: UsageSnapshot | null): void {
   if (snap === null) {
     m.gauges.clear();
     m.usagePill.hidden = false;
-    m.usagePill.textContent = "unavailable";
+    m.usagePill.textContent = t("unavailable");
     setTone(m.usagePill, "idle");
     m.usageNote.textContent = "";
     m.usageGauges.replaceChildren(
-      el("div", "usage-unavailable", "Cannot read the usage limits."),
+      el("div", "usage-unavailable", t("Cannot read the usage limits.")),
     );
     return;
   }
@@ -224,23 +225,23 @@ function renderUsage(snap: UsageSnapshot | null): void {
   // genuinely knows nothing — and must not imply a full tank.
   if (!snap.measured) {
     m.usagePill.hidden = false;
-    m.usagePill.textContent = "no reading";
+    m.usagePill.textContent = t("no reading");
     setTone(m.usagePill, "warn");
-    m.usageNote.textContent = "nothing measured since JARVIS started";
+    m.usageNote.textContent = t("nothing measured since JARVIS started");
   } else if (snap.stale) {
     m.usagePill.hidden = false;
-    m.usagePill.textContent = "stale";
+    m.usagePill.textContent = t("stale");
     setTone(m.usagePill, "warn");
-    m.usageNote.textContent = `last measured ${fmtAge(snap.age_sec ?? 0)}`;
+    m.usageNote.textContent = t("last measured {age}", { age: fmtAge(snap.age_sec ?? 0) });
   } else {
     m.usagePill.hidden = true;
-    m.usageNote.textContent = `measured ${fmtAge(snap.age_sec ?? 0)}`;
+    m.usageNote.textContent = t("measured {age}", { age: fmtAge(snap.age_sec ?? 0) });
   }
 
   for (const w of snap.windows) {
     let gauge = m.gauges.get(w.key);
     if (!gauge) {
-      const b = bar(w.label);
+      const b = bar(t(w.label));
       const when = el("div", "usage-when");
       const wrap = el("div", "usage-gauge");
       wrap.append(b.root, when);
@@ -258,17 +259,18 @@ function renderUsage(snap: UsageSnapshot | null): void {
       gauge.bar.set(pct, `${Math.round(pct)}%`);
     } else {
       setTone(gauge.bar.root, "dim");
-      gauge.bar.unknown(w.expired ? "reset since" : "not measured");
+      gauge.bar.unknown(w.expired ? t("reset since") : t("not measured"));
     }
     gauge.bar.setStale(usable && w.stale);
 
     const parts: string[] = [];
     if (w.resets_at !== null) {
-      parts.push(w.expired ? `reset ${fmtWhen(w.resets_at)}` : `resets ${fmtWhen(w.resets_at)}`);
+      const when = fmtWhen(w.resets_at);
+      parts.push(w.expired ? t("reset {when}", { when }) : t("resets {when}", { when }));
     } else if (!usable) {
-      parts.push("no reading yet");
+      parts.push(t("no reading yet"));
     } else {
-      parts.push("reset time unknown");
+      parts.push(t("reset time unknown"));
     }
     if (usable && w.stale && w.age_sec !== null) parts.push(fmtAge(w.age_sec));
     gauge.when.textContent = parts.join(" · ");
@@ -284,10 +286,11 @@ function renderNow(active: number, failures: number): void {
   m.nowDot.className = `dot ${active > 0 ? "dot--live" : "dot--void"} tone-${tone}`;
   setTone(m.nowRoot, tone);
   m.nowText.textContent =
-    active > 0 ? `${active} running` : runs.length > 0 ? "all quiet" : "no runs yet";
+    active > 0 ? t("{n} running", { n: active })
+      : runs.length > 0 ? t("all quiet") : t("no runs yet");
 
   m.attn.hidden = failures === 0;
-  m.attn.textContent = `${failures} need${failures === 1 ? "s" : ""} you`;
+  m.attn.textContent = tp(failures, "{n} needs you", "{n} need you");
 }
 
 // ── Link state ──────────────────────────────────────────────────────────────
@@ -299,9 +302,9 @@ function setLink(state: Link): void {
   const text = document.getElementById("link-state-text");
   if (!host || !text) return;
   const spec = {
-    ok: { tone: "tone-ok", dot: "dot--done", label: "Link OK" },
-    retrying: { tone: "tone-warn", dot: "dot--live", label: "Reconnecting" },
-    down: { tone: "tone-bad", dot: "dot--fault", label: "Offline" },
+    ok: { tone: "tone-ok", dot: "dot--done", label: t("Link OK") },
+    retrying: { tone: "tone-warn", dot: "dot--live", label: t("Reconnecting") },
+    down: { tone: "tone-bad", dot: "dot--fault", label: t("Offline") },
   }[state];
   host.className = `link-state ${spec.tone}`;
   const dot = host.querySelector(".dot");
@@ -375,12 +378,12 @@ function paint(): void {
   renderInto(
     "active-list", "active-meta",
     runs.filter((r) => ACTIVE.has(r.status)),
-    "Nothing running.",
+    t("Nothing running."),
   );
   renderInto(
     "history-list", "history-meta",
     runs.filter((r) => !ACTIVE.has(r.status)),
-    "No runs yet. Ask JARVIS to build something.",
+    t("No runs yet. Ask JARVIS to build something."),
   );
 }
 
@@ -409,7 +412,7 @@ async function reconcile(): Promise<void> {
     showBanner(null);
   } catch (e) {
     console.error("[dashboard] reconcile failed", e);
-    showBanner("Cannot reach the JARVIS server.");
+    showBanner(t("Cannot reach the JARVIS server."));
   }
   await refreshUsage();
 }
@@ -438,7 +441,9 @@ function showBanner(text: string | null): void {
   }
   banner.hidden = false;
   banner.textContent = text;
-  setLink(text.startsWith("Reconnecting") ? "retrying" : "down");
+  // Compared with the translated sentence, never with English: the text is
+  // what says which of the two states this is.
+  setLink(text === t("Reconnecting to JARVIS…") ? "retrying" : "down");
 }
 
 function onRunChanged(run: RunRow): void {
@@ -522,7 +527,7 @@ document.addEventListener("DOMContentLoaded", () => {
       appendEvent(runId, seq, kind, payload);
     },
     onConnectionChange: (connected) =>
-      showBanner(connected ? null : "Reconnecting to JARVIS…"),
+      showBanner(connected ? null : t("Reconnecting to JARVIS…")),
   });
 
   // Elapsed time ticks locally so active rows stay honest between frames.

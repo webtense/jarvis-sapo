@@ -39,6 +39,7 @@ code under test. `browser.py` uses the async API for the same reason.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -53,6 +54,11 @@ VIEWPORT = {"width": 1400, "height": 900}
 REPO = Path(__file__).resolve().parent.parent
 FRONTEND = REPO / "frontend"
 DIST = FRONTEND / "dist"
+# Language the bundle is compiled for -> VITE_JARVIS_LANG, which is fixed at
+# BUILD time (it is how scripts/start-ubuntu.sh tells the page its language).
+# "en" is the default build: the variable is REMOVED from the environment, so
+# the English bundle is the one that ships when nothing is set.
+LANG_ENV = {"es": "es-ES"}
 BUILD_TIMEOUT_SEC = 300
 
 
@@ -79,18 +85,26 @@ def _newest_source() -> float:
     return newest
 
 
-def build_bundle() -> Path:
+def build_bundle(lang: str = "en") -> Path:
     """`frontend/dist`, rebuilt only if a source file is newer than it.
 
     The same `npm run build` a developer runs — never a bespoke bundling
-    path, or the thing under test stops being the thing that ships.
+    path, or the thing under test stops being the thing that ships. Another
+    language goes to its own `dist-<lang>` folder, so the English bundle the
+    rest of the suite reads is never overwritten by a Spanish one.
     """
-    target = DIST / "dashboard.html"
+    out = DIST if lang == "en" else FRONTEND / f"dist-{lang}"
+    target = out / "dashboard.html"
     if not target.is_file() or target.stat().st_mtime < _newest_source():
-        subprocess.run(["npm", "run", "build"], cwd=FRONTEND, check=True,
+        env = {k: v for k, v in os.environ.items() if k != "VITE_JARVIS_LANG"}
+        cmd = ["npm", "run", "build"]
+        if lang != "en":
+            env["VITE_JARVIS_LANG"] = LANG_ENV[lang]
+            cmd += ["--", "--outDir", out.name, "--emptyOutDir"]
+        subprocess.run(cmd, cwd=FRONTEND, check=True, env=env,
                        capture_output=True, text=True,
                        timeout=BUILD_TIMEOUT_SEC)
-    return DIST
+    return out
 
 
 class Api:
@@ -265,7 +279,7 @@ def usage_limits(*keys: str) -> dict:
 
 
 @asynccontextmanager
-async def dashboard(api: Api):
+async def dashboard(api: Api, lang: str = "en"):
     """The built page, loaded against `api`, as a `page` to drive.
 
     The browser is launched per test rather than shared: a session-scoped
@@ -279,12 +293,16 @@ async def dashboard(api: Api):
     """
     from playwright.async_api import async_playwright
 
-    dist = build_bundle()
+    dist = build_bundle(lang)
     with StubServer(api, dist) as server:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             try:
-                context = await browser.new_context(viewport=VIEWPORT)
+                # The browser's own locale follows the page's language, as it
+                # would on the machine that set JARVIS_LANGUAGE=es.
+                options = {"locale": LANG_ENV[lang]} if lang != "en" else {}
+                context = await browser.new_context(viewport=VIEWPORT,
+                                                    **options)
                 page = await context.new_page()
                 await page.clock.install()
                 await page.goto(f"{server.base}/dashboard.html",

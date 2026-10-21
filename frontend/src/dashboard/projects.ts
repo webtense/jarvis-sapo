@@ -16,6 +16,7 @@ import {
   type ProjectListItem, type ProjectDetail, type SessionRow, type RunRow,
   type OpenTarget,
 } from "./api";
+import { t, tc, tp, loc, unit, ago, fmtFixed } from "../i18n";
 import {
   el, row, panel, bar, pill, button, statusDot, statusPill, stateStyle,
   emptyState, stack, type Tone,
@@ -43,32 +44,32 @@ let detailToken = 0;
 function fmtAge(epochSec: number | null): string {
   if (epochSec === null) return "—";
   const secs = Math.max(0, Math.round(Date.now() / 1000 - epochSec));
-  if (secs < 60) return "just now";
+  if (secs < 60) return t("just now");
   const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 60) return ago(unit(mins, "m"));
   const hours = Math.floor(mins / 60);
-  if (hours < 48) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+  if (hours < 48) return ago(unit(hours, "h"));
+  return ago(unit(Math.floor(hours / 24), "d"));
 }
 
 function fmtClock(epochSec: number): string {
   return new Date(epochSec * 1000)
-    .toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    .toLocaleTimeString(loc(), { hour: "2-digit", minute: "2-digit" });
 }
 
 function fmtDuration(run: RunRow): string {
   if (!run.started_at) return "—";
   const end = run.ended_at ?? Date.now() / 1000;
   const secs = Math.max(0, Math.round(end - run.started_at));
-  return `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, "0")}s`;
+  return `${unit(Math.floor(secs / 60), "m")} ${unit(String(secs % 60).padStart(2, "0"), "s")}`;
 }
 
 function fmtTokens(run: RunRow): string {
   const total = run.input_tokens + run.output_tokens;
   if (total <= 0) return "—";
   if (total < 1000) return `${total} tok`;
-  if (total < 1_000_000) return `${(total / 1000).toFixed(total < 10_000 ? 1 : 0)}k tok`;
-  return `${(total / 1_000_000).toFixed(1)}M tok`;
+  if (total < 1_000_000) return `${fmtFixed(total / 1000, total < 10_000 ? 1 : 0)}k tok`;
+  return `${fmtFixed(total / 1_000_000, 1)}M tok`;
 }
 
 /** One state word for the project as a whole: the worst/most-attention-
@@ -106,16 +107,16 @@ function projectRow(p: ProjectListItem): HTMLElement {
 
   r.setLead(statusDot(state));
   r.setTitle(p.name);
-  r.setSub(p.directory_exists ? p.primary_path : "directory not found");
+  r.setSub(p.directory_exists ? p.primary_path : t("directory not found"));
 
   if (p.needs_you_count > 0) {
     r.addTrail(pill(
-      p.needs_you_count === 1 ? "needs you" : `${p.needs_you_count} need you`,
+      tp(p.needs_you_count, "needs you", "{n} need you"),
       "bad"));
   } else {
     r.addTrail(statusPill(state));
   }
-  if (!p.directory_exists) r.addTrail(pill("missing", "warn", "ghost"));
+  if (!p.directory_exists) r.addTrail(pill(t("missing"), "warn", "ghost"));
   r.addMeta(fmtAge(p.last_activity), { w: "68px" });
 
   return r.root;
@@ -134,7 +135,7 @@ function paintList(): void {
   if (!listEl) return;
   listEl.replaceChildren();
   if (projects.length === 0) {
-    listEl.append(emptyState("No projects found yet."));
+    listEl.append(emptyState(t("No projects found yet.")));
     return;
   }
   for (const p of projects) listEl.append(projectRow(p));
@@ -143,26 +144,27 @@ function paintList(): void {
 // ── The detail (right column) ───────────────────────────────────────────
 
 function whereItIs(d: ProjectDetail): HTMLElement {
-  const p = panel("Where It Is", { tone: d.directory_exists ? undefined : "warn" });
+  const p = panel(t("Where It Is"), { tone: d.directory_exists ? undefined : "warn" });
   const body = p.body;
 
   const pathRow = el("div", "proj-path-row");
-  pathRow.append(el("code", "proj-path-value", d.primary_path || "(unknown)"));
+  pathRow.append(el("code", "proj-path-value", d.primary_path || t("(unknown)")));
   if (!d.directory_exists) {
-    pathRow.append(pill("not found on disk", "warn"));
+    pathRow.append(pill(t("not found on disk"), "warn"));
   }
   body.append(pathRow);
 
   if (d.paths.length > 1) {
     const others = d.paths.filter((x) => x !== d.primary_path);
     body.append(el("div", "proj-path-note",
-      `Also seen at ${others.length} other location${others.length === 1 ? "" : "s"}: ${others.join(", ")}`));
+      tp(others.length, "Also seen at {n} other location: {list}",
+         "Also seen at {n} other locations: {list}", { list: others.join(", ") })));
   }
 
   const actions = el("div", "pane-actions proj-open-actions");
   const targets: [OpenTarget, string][] = [
-    ["editor", "Open in Editor"], ["terminal", "Open in Terminal"],
-    ["browser", "Open in Browser"],
+    ["editor", t("Open in Editor")], ["terminal", t("Open in Terminal")],
+    ["browser", t("Open in Browser")],
   ];
   for (const [target, label] of targets) {
     const btn = button(label, () => void doOpen(d, target, btn));
@@ -179,10 +181,10 @@ async function doOpen(d: ProjectDetail, target: OpenTarget, btn: HTMLButtonEleme
   btn.disabled = true;
   try {
     const ok = await openProject(d.name, d.primary_path, target);
-    btn.textContent = ok ? "Opened" : "Failed";
+    btn.textContent = ok ? t("Opened") : tc("button", "Failed");
   } catch (e) {
     console.error("[projects] open failed", e);
-    btn.textContent = "Failed";
+    btn.textContent = tc("button", "Failed");
   }
   setTimeout(() => {
     btn.textContent = original;
@@ -201,12 +203,12 @@ function sessionRow(s: SessionRow): HTMLElement {
 
   if (needsYou) {
     const reason = s.needs || (s.last_text ? s.last_text.replace(/\s+/g, " ").slice(0, 200)
-                                            : "stopped and wants you");
+                                            : t("stopped and wants you"));
     r.addBody(el("div", "session-reason", reason));
     if (s.needs_a_human_hand) {
       const hand = el("div", "session-hand");
-      hand.append(pill("your keystroke", "bad"),
-        el("span", "row-meta", "JARVIS can't answer this one"));
+      hand.append(pill(t("your keystroke"), "bad"),
+        el("span", "row-meta", t("JARVIS can't answer this one")));
       r.addBody(hand);
     }
   } else if (s.summary) {
@@ -217,13 +219,13 @@ function sessionRow(s: SessionRow): HTMLElement {
 
 function conversationsPanel(d: ProjectDetail): HTMLElement {
   const needing = d.sessions.filter((s) => s.state === "needs_you").length;
-  const p = panel("Conversations", {
+  const p = panel(t("Conversations"), {
     meta: d.sessions.length > 0 ? String(d.sessions.length) : "",
     tone: needing > 0 ? "bad" : undefined,
     alert: needing > 0,
   });
   if (d.sessions.length === 0) {
-    p.body.append(emptyState("No conversations for this project."));
+    p.body.append(emptyState(t("No conversations for this project.")));
     return p.root;
   }
   const sorted = [...d.sessions].sort((a, b) => {
@@ -251,12 +253,12 @@ function runRow(r: RunRow): HTMLElement {
 
 function runsPanel(d: ProjectDetail): HTMLElement {
   const failing = d.runs.filter((r) => r.status === "failed" || r.status === "timed_out").length;
-  const p = panel("Runs", {
+  const p = panel(t("Runs"), {
     meta: d.runs.length > 0 ? String(d.runs.length) : "",
     tone: failing > 0 ? "bad" : undefined,
   });
   if (d.runs.length === 0) {
-    p.body.append(emptyState("No runs yet."));
+    p.body.append(emptyState(t("No runs yet.")));
     return p.root;
   }
   const list = stack();
@@ -269,50 +271,52 @@ function buildPanel(d: ProjectDetail): HTMLElement {
   const b = d.build;
   const hasAnything = b.has_spec || b.has_plan || b.progress !== null;
   const stalled = !!b.progress && !b.progress.finished && !d.active;
-  const p = panel("Build", { tone: stalled ? "bad" : undefined });
+  const p = panel(t("Build"), { tone: stalled ? "bad" : undefined });
 
   if (!hasAnything) {
-    p.body.append(emptyState("No build started for this project."));
+    p.body.append(emptyState(t("No build started for this project.")));
     return p.root;
   }
 
   const pills = el("div", "proj-build-pills");
   pills.append(
-    pill(b.has_spec ? "spec written" : "no spec", b.has_spec ? "ok" : "dim", "ghost"),
-    pill(b.has_plan ? "plan written" : "no plan", b.has_plan ? "ok" : "dim", "ghost"),
+    pill(b.has_spec ? t("spec written") : t("no spec"), b.has_spec ? "ok" : "dim", "ghost"),
+    pill(b.has_plan ? t("plan written") : t("no plan"), b.has_plan ? "ok" : "dim", "ghost"),
   );
-  if (stalled) pills.append(pill("stalled", "bad"));
+  if (stalled) pills.append(pill(t("stalled"), "bad"));
   p.body.append(pills);
 
   if (b.progress === null) {
     p.body.append(el("div", "proj-build-note",
-      b.has_spec ? "Still planning — no plan file yet." : ""));
+      b.has_spec ? t("Still planning — no plan file yet.") : ""));
     return p.root;
   }
 
   const progress = b.progress;
   const pct = progress.total > 0 ? (progress.done / progress.total) * 100 : 0;
   const tone: Tone = progress.finished ? "ok" : stalled ? "bad" : "accent";
-  const g = bar("Tasks done", { tone, pct, value: `${progress.done} of ${progress.total}` });
+  const g = bar(t("Tasks done"), { tone, pct, value: t("{done} of {total}", { done: progress.done, total: progress.total }) });
   p.body.append(g.root);
 
   if (progress.current_task && !progress.finished) {
     p.body.append(el("div", "proj-build-note",
-      `On Task ${progress.current_task.number}: ${progress.current_task.title}`));
+      t("On Task {number}: {title}", {
+        number: progress.current_task.number, title: progress.current_task.title,
+      })));
   } else if (progress.finished) {
-    p.body.append(el("div", "proj-build-note", "All tasks done."));
+    p.body.append(el("div", "proj-build-note", t("All tasks done.")));
   }
   return p.root;
 }
 
 function repoPanel(d: ProjectDetail): HTMLElement {
-  const p = panel("Repository");
+  const p = panel(t("Repository"));
   if (!d.directory_exists) {
-    p.body.append(emptyState("Directory not found on disk — nothing to read."));
+    p.body.append(emptyState(t("Directory not found on disk — nothing to read.")));
     return p.root;
   }
   if (!d.repo.exists || !d.repo.headline) {
-    p.body.append(emptyState("Nothing readable here yet."));
+    p.body.append(emptyState(t("Nothing readable here yet.")));
     return p.root;
   }
   p.body.append(el("div", "proj-repo-headline", d.repo.headline));
@@ -328,8 +332,8 @@ function renderDetail(): void {
   host.replaceChildren();
 
   if (projects.length === 0) {
-    host.append(emptyState("No projects found yet. JARVIS lists a project as "
-      + "soon as a conversation or a run touches it."));
+    host.append(emptyState(t("No projects found yet. JARVIS lists a project as "
+      + "soon as a conversation or a run touches it.")));
     return;
   }
   if (detail === null) {
@@ -337,16 +341,16 @@ function renderDetail(): void {
     // rendered "Select a project to see more." with the row still
     // highlighted — an instruction to do the thing the user had just done.
     host.append(emptyState(detailFailed === null
-      ? "Select a project to see more."
-      : `Could not load ${detailFailed}. The server answered, but not with `
-        + "this project."));
+      ? t("Select a project to see more.")
+      : t("Could not load {name}. The server answered, but not with this project.",
+          { name: detailFailed ?? "" })));
     return;
   }
 
   const d = detail;
   const head = el("div", "proj-detail-head");
   head.append(statusDot(aggregateState(d)), el("h2", "proj-detail-title", d.name));
-  if (!d.directory_exists) head.append(pill("directory missing", "bad"));
+  if (!d.directory_exists) head.append(pill(t("directory missing"), "bad"));
   host.append(head);
 
   host.append(whereItIs(d), conversationsPanel(d), runsPanel(d), buildPanel(d), repoPanel(d));
@@ -390,7 +394,7 @@ async function reconcile(): Promise<void> {
     showBanner(null);
   } catch (e) {
     console.error("[projects] reconcile failed", e);
-    showBanner("Cannot reach the JARVIS server.");
+    showBanner(t("Cannot reach the JARVIS server."));
     return;
   }
   paintList();
