@@ -224,8 +224,11 @@ async def test_a_slower_pace_reaches_the_voice(fake_piper, monkeypatch):
             out.writeframes(b"\x00\x00" * 100)
 
     monkeypatch.setattr(tts, "_load_voice", lambda path=None: Voice())
-    fake_module = types.SimpleNamespace(SynthesisConfig=lambda length_scale: types.SimpleNamespace(length_scale=length_scale))
-    monkeypatch.setitem(sys.modules, "piper", types.SimpleNamespace(PiperVoice=None, SynthesisConfig=fake_module.SynthesisConfig))
+    # `fake_piper` already put a proper module (with a __spec__, which
+    # `local_available()` looks for) in sys.modules: give it the config class.
+    monkeypatch.setattr(sys.modules["piper"], "SynthesisConfig",
+                        lambda length_scale: types.SimpleNamespace(length_scale=length_scale),
+                        raising=False)
     monkeypatch.delenv("PIPER_LENGTH_SCALE", raising=False)
     await tts.synthesize_local("hola")
     monkeypatch.setenv("PIPER_LENGTH_SCALE", "1.2")
