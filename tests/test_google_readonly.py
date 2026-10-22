@@ -172,6 +172,12 @@ def test_tasks_list_default(net):
     assert not err and "Comprar pan" in text
 
 
+def test_tasks_list_gives_the_id_the_brain_needs_to_act(net):
+    """Without the id a 'complete that task' request cannot name the task."""
+    err, text = _call("google_tasks_list")
+    assert not err and "[id " in text and ", lista " in text
+
+
 def test_drive_search(net):
     err, text = _call("google_drive_search", query="doc")
     assert not err and "doc.txt" in text and "f1" in text
