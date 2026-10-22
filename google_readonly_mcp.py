@@ -333,9 +333,12 @@ def tasks_list(list_id: str = "", limit: int = 20) -> str:
     items = data.get("items", [])
     if not items:
         return "No pending tasks."
+    # The id is what a later action needs to act on this task. Without it the
+    # brain can only name the task, and "complete that one" cannot be proposed.
     lines = [f"{_clean(t.get('title', '(sin título)'))}"
              + (f" (due {_clean(t.get('due', ''), 25)})" if t.get("due") else "")
-             for t in items[:limit]]
+             + f" [id {_clean(t.get('id', ''), 200)}, lista {_clean(list_id, 200)}]"
+             for t in items[:limit] if t.get("id")]
     return _wrap(lines)
 
 

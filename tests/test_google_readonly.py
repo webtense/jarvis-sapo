@@ -54,7 +54,7 @@ GMAIL_MSG = {
 }
 CAL_LIST = {"items": [{"id": "primary"}]}
 CAL_EVENTS = {"items": [{"summary": "Reunion", "start": {"dateTime": "2026-10-22T10:00:00Z"}}]}
-TASKS = {"items": [{"title": "Comprar pan", "due": "2026-10-22T00:00:00Z"}]}
+TASKS = {"items": [{"id": "dGFzazAx", "title": "Comprar pan", "due": "2026-10-22T00:00:00Z"}]}
 DRIVE_LIST = {"files": [{"id": "f1", "name": "doc.txt", "mimeType": "text/plain"}]}
 SHEET_VALUES = {"values": [["a", "b"], ["c", "d"]]}
 
@@ -170,6 +170,12 @@ def test_calendar_events_lists_upcoming(net):
 def test_tasks_list_default(net):
     err, text = _call("google_tasks_list")
     assert not err and "Comprar pan" in text
+
+
+def test_tasks_list_gives_the_id_the_brain_needs_to_act(net):
+    """Without the id a 'complete that task' request cannot name the task."""
+    err, text = _call("google_tasks_list")
+    assert not err and "[id " in text and ", lista " in text
 
 
 def test_drive_search(net):
