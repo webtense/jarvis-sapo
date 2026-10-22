@@ -54,7 +54,7 @@ GMAIL_MSG = {
 }
 CAL_LIST = {"items": [{"id": "primary"}]}
 CAL_EVENTS = {"items": [{"summary": "Reunion", "start": {"dateTime": "2026-10-22T10:00:00Z"}}]}
-TASKS = {"items": [{"title": "Comprar pan", "due": "2026-10-22T00:00:00Z"}]}
+TASKS = {"items": [{"id": "dGFzazAx", "title": "Comprar pan", "due": "2026-10-22T00:00:00Z"}]}
 DRIVE_LIST = {"files": [{"id": "f1", "name": "doc.txt", "mimeType": "text/plain"}]}
 SHEET_VALUES = {"values": [["a", "b"], ["c", "d"]]}
 
