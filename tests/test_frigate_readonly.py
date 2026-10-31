@@ -26,11 +26,17 @@ def cams(monkeypatch):
     return calls
 
 
-def test_only_allowed_get_paths(cams):
-    with pytest.raises(fm.FrigateError):
-        fm._get("/api/cameras/Tejado/record/on")  # not in the allowlist
-    with pytest.raises(fm.FrigateError):
-        fm._get("/api/events/123/delete")
+def test_only_allowed_get_paths():
+    # La comprobación real vive en _get, que rechaza antes de abrir socket.
+    # Aquí se prueba la lista blanca directamente, sin depender del fixture
+    # que sustituye _get por un falso.
+    def allowed(path):
+        return any(rx.fullmatch(path) for rx in fm._ALLOWED_PATHS)
+
+    assert allowed("/api/events")
+    assert allowed("/api/Tejado/latest.jpg")
+    assert not allowed("/api/cameras/Tejado/record/on")
+    assert not allowed("/api/events/123/delete")
 
 
 def test_indoor_cameras_are_refused_and_not_listed(cams):
