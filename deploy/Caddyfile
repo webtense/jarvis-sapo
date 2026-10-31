@@ -1,0 +1,33 @@
+# Caddy 2.x — entrada única del jarvis-sapo desplegado en el CT (p.ej. CT 215).
+# El backend (jarvis-sapo.service) escucha solo en 127.0.0.1:8340; Caddy es la
+# única puerta: certificado TLS interno (self-signed, gestionado por Caddy) y
+# autenticación básica delante del proxy inverso.
+#
+# PLANTILLA: no contiene secretos. El dominio (jarvis.casa) y la IP interna
+# (192.168.69.225) son los datos de red fijados para este despliegue; el
+# usuario y el hash de la contraseña se leen de variables de entorno de
+# Caddy, nunca en claro en este fichero:
+#   JARVIS_BASIC_USER=... JARVIS_BASIC_HASH='$2a$...' caddy run --envfile /etc/caddy/jarvis.env
+# (o systemd EnvironmentFile= en la unidad de caddy)
+#
+# El hash bcrypt se genera aparte, SIN que el resultado se pegue en este
+# fichero ni en ningún otro versionado:
+#   caddy hash-password --plaintext 'la-contraseña-elegida'
+
+jarvis.casa, 192.168.69.225 {
+	bind 192.168.69.225
+	tls internal
+
+	basic_auth {
+		{$JARVIS_BASIC_USER} {$JARVIS_BASIC_HASH}
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		# HSTS se omite a propósito: con "tls internal" el certificado es
+		# autofirmado y forzar HSTS en los navegadores sería contraproducente.
+	}
+
+	reverse_proxy 127.0.0.1:8340
+}
