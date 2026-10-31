@@ -3,8 +3,8 @@
 # única puerta: certificado TLS interno (self-signed, gestionado por Caddy) y
 # autenticación básica delante del proxy inverso.
 #
-# PLANTILLA: no contiene secretos. El dominio (jarvis.casa) y la IP interna
-# (192.168.69.225) son los datos de red fijados para este despliegue; el
+# PLANTILLA: no contiene secretos ni datos de tu red. El nombre y la IP se
+# leen de variables de entorno (JARVIS_HOST, JARVIS_LAN_IP); el
 # usuario y el hash de la contraseña se leen de variables de entorno de
 # Caddy, nunca en claro en este fichero:
 #   JARVIS_BASIC_USER=... JARVIS_BASIC_HASH='$2a$...' caddy run --envfile /etc/caddy/jarvis.env
@@ -14,8 +14,8 @@
 # fichero ni en ningún otro versionado:
 #   caddy hash-password --plaintext 'la-contraseña-elegida'
 
-jarvis.casa, 192.168.69.225 {
-	bind 192.168.69.225
+{$JARVIS_HOST}, {$JARVIS_LAN_IP} {
+	bind {$JARVIS_LAN_IP}
 	tls internal
 
 	basic_auth {
