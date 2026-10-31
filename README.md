@@ -1,6 +1,6 @@
 > [Versión en castellano](README.es.md)
 
-> **jarvis-ubuntu** es un fork de [ethanplusai/jarvis](https://github.com/ethanplusai/jarvis) (© 2026 Ethan Rogers) para Ubuntu/Linux.
+> **jarvis-sapo** es un fork de [ethanplusai/jarvis](https://github.com/ethanplusai/jarvis) (© 2026 Ethan Rogers) para Ubuntu/Linux.
 > Mantiene la licencia original: uso personal, educativo y **no comercial**; el uso comercial requiere licencia del autor.
 > Estado: en desarrollo (ver [CHANGELOG](CHANGELOG.md)). Ubuntu: `scripts/install-ubuntu.sh` y después `scripts/start-ubuntu.sh`. Para que JARVIS pueda contestar permisos en otras sesiones, lanza `claude` con `scripts/jarvis-claude` (usa tmux; Wayland no permite pulsar teclas en otras ventanas).
 
@@ -53,7 +53,7 @@ invented.*
 
 ## Ubuntu
 
-Fork `jarvis-ubuntu`. Lo que hay en el repo:
+Fork `jarvis-sapo`. Lo que hay en el repo:
 
 - **Instalación:** `scripts/install-ubuntu.sh`. Comprueba Python 3.11+ y Node 18+, instala los paquetes del sistema (pide `sudo`), crea `.venv`, instala Playwright/Chromium, descarga la voz local de Piper, hace `npm ci` en `frontend/`, genera `cert.pem`/`key.pem` y copia `.env.example` a `.env`. Si los paquetes ya están instalados, `JARVIS_SKIP_APT=1 scripts/install-ubuntu.sh` omite `apt` y `sudo`.
 - **Arranque:** `scripts/start-ubuntu.sh`. El backend escucha solo en `127.0.0.1` y Vite en el puerto fijo 5173 (`http://localhost:5173`, panel en `/dashboard.html`).

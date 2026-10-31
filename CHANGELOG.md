@@ -1,4 +1,4 @@
-# Changelog — jarvis-ubuntu
+# Changelog — jarvis-sapo
 
 Fork de [ethanplusai/jarvis](https://github.com/ethanplusai/jarvis) (© 2026 Ethan Rogers) orientado a Ubuntu/Linux.
 Versionado semántico con prefijo `ubuntu-`. Uso personal y no comercial, igual que la licencia original.

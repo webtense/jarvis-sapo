@@ -6,15 +6,15 @@ Five providers behind one seam (`SynthResult` or None, never raises):
 * **Fish Audio** (upstream's only voice): streamed so time-to-first-byte can be
   measured; the chunk is returned whole because the browser decodes one
   complete MP3 per chunk.
-* **Piper** (jarvis-ubuntu): a local neural voice, no network and no key. One
+* **Piper** (jarvis-sapo): a local neural voice, no network and no key. One
   complete WAV per chunk, which `decodeAudioData` takes just as well as MP3.
   Piper is an OPTIONAL dependency (`requirements-linux.txt`); everything here
   imports it lazily so the rest of JARVIS never needs it.
 
-* **Kokoro** (jarvis-ubuntu, local, optional): `kokoro-onnx` plus a ~90 MB
+* **Kokoro** (jarvis-sapo, local, optional): `kokoro-onnx` plus a ~90 MB
   model. Never chosen by `auto` while Piper is there; opt in with
   `JARVIS_TTS_PROVIDER=kokoro`.
-* **Edge** (jarvis-ubuntu, CLOUD, optional): Microsoft's online voices through
+* **Edge** (jarvis-sapo, CLOUD, optional): Microsoft's online voices through
   the unofficial `edge-tts` package. The text of every sentence LEAVES THE
   MACHINE. Strictly opt-in (`JARVIS_TTS_PROVIDER=edge`): `auto` never picks it.
   It is not an official API and may stop working; a failure falls back to

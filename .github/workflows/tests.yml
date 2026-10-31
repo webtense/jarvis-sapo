@@ -27,7 +27,7 @@ jobs:
   pytest:
     name: pytest (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Ubuntu is the jarvis-ubuntu port; macOS stays the upstream reference.
+    # Ubuntu is the jarvis-sapo port; macOS stays the upstream reference.
     # Both must be green.
     timeout-minutes: 25
     strategy:
