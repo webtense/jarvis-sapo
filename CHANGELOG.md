@@ -3,6 +3,12 @@
 Fork de [ethanplusai/jarvis](https://github.com/ethanplusai/jarvis) (© 2026 Ethan Rogers) orientado a Ubuntu/Linux.
 Versionado semántico con prefijo `ubuntu-`. Uso personal y no comercial, igual que la licencia original.
 
+## ubuntu-0.9.0 — Acceso remoto seguro (F1)
+- Despliegue en CT dedicado (p.ej. CT 215) tras Caddy (`deploy/Caddyfile`): HTTPS interno (`tls internal`) y autenticación básica delante del proxy inverso.
+- El servidor (`jarvis-sapo.service`, `deploy/jarvis-sapo.service`) escucha solo en 127.0.0.1:8340; Caddy es la única entrada, con cabeceras de seguridad básicas.
+- Plantilla `deploy/jarvis.env.example` para `/etc/jarvis-sapo/jarvis.env` (solo valores no secretos; las claves se añaden a mano con permisos 0640).
+- `scripts/deploy-ct.sh`: despliegue con comprobación de salud y rollback automático al SHA anterior si falla cualquier paso tras el cambio.
+
 ## ubuntu-0.8.0 — Google con escritura, pantalla de administración, voz y trato más naturales
 - **Google con escritura y confirmación** (`google_actions.py`, desactivado por defecto): crear y modificar eventos de Calendar, crear/modificar/completar tareas y crear o ampliar notas como documentos de Google Docs en la carpeta 'JARVIS Notas' (Keep no tiene API en cuentas personales). Sin borrar, sin enviar correo, sin invitados ni compartir. El cerebro solo propone (`google_propose`), JARVIS lo dice entero y solo ejecuta tras tu "sí" oído después de la pregunta; token de escritura aparte (`google_write.json`, `scripts/google-auth.py --write`), política en `data/jarvis/google-actions.json`, simulacro `JARVIS_GOOGLE_DRYRUN=1`, auditoría y límite por minuto. Ver `docs/google-escritura.md`.
 - **Pantalla de administración** `/admin.html`: Perfil, Voz, Escucha, Conexiones, Casa y Sistema, con un esquema cerrado de ajustes (nunca claves ni tokens; la lista blanca de la casa solo se edita a mano). Ver `docs/admin.md`.

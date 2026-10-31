@@ -1,0 +1,43 @@
+# Unidad systemd del SERVIDOR jarvis-sapo dentro del CT (no confundir con
+# scripts/jarvis.service, que es la unidad del portátil del usuario y no se
+# toca). Pensada para un contenedor Debian 12 dedicado (p.ej. CT 215),
+# instalada en /etc/systemd/system/jarvis-sapo.service.
+#
+# El servidor escucha SOLO en 127.0.0.1:8340. No expone nada a la red
+# directamente: Caddy (ver deploy/Caddyfile) es la única entrada, con HTTPS
+# interno y autenticación básica, y reenvía a este puerto en loopback.
+#
+# Instalación (manual, no la hace este fichero):
+#   useradd --system --home /opt/jarvis-sapo --shell /usr/sbin/nologin jarvis
+#   mkdir -p /var/lib/jarvis-sapo /etc/jarvis-sapo
+#   chown jarvis:jarvis /var/lib/jarvis-sapo
+#   cp deploy/jarvis-sapo.service /etc/systemd/system/jarvis-sapo.service
+#   systemctl daemon-reload && systemctl enable --now jarvis-sapo.service
+
+[Unit]
+Description=JARVIS Sapo - servidor backend (solo loopback, tras Caddy)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jarvis
+Group=jarvis
+WorkingDirectory=/opt/jarvis-sapo
+EnvironmentFile=/etc/jarvis-sapo/jarvis.env
+ExecStart=/opt/jarvis-sapo/.venv/bin/python /opt/jarvis-sapo/server.py --host 127.0.0.1 --port 8340
+Restart=on-failure
+RestartSec=10
+
+# Endurecimiento (systemd sandboxing)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/jarvis-sapo
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
