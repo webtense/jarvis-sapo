@@ -15,7 +15,7 @@ When a user clones this repo and starts Claude Code, help them:
    newer) and log in with `claude` — JARVIS's brain runs on your Claude
    subscription, not on an API key
 3. Voice: either a Fish Audio API key from fish.audio (optional, paid) or the
-   local Piper voice of the jarvis-ubuntu fork (`requirements-linux.txt`, free;
+   local Piper voice of the jarvis-sapo fork (`requirements-linux.txt`, free;
    `tts.provider()` picks whichever is configured). With neither, JARVIS is
    text only
 4. Install Python dependencies: pip install -r requirements.txt
@@ -159,7 +159,7 @@ JARVIS builds**. It is only this repository's own copies that are gone.
   never spawns it (every test sets this)
 - `JARVIS_MUTE_MIC_DURING_SPEECH` (optional, default false) — fallback if echo
   rejection is not enough with a given microphone
-- `FISH_API_KEY` (optional in jarvis-ubuntu, which can use Piper instead) — Fish Audio TTS
+- `FISH_API_KEY` (optional in jarvis-sapo, which can use Piper instead) — Fish Audio TTS
 - `FISH_VOICE_ID` (optional) — Voice model ID
 - `USER_NAME` (optional) — Your name for JARVIS to use
 - `JARVIS_DATA_DIR` (optional) — Where JARVIS writes everything: the SQLite
@@ -216,7 +216,7 @@ needs the network, a real window, or a real `claude`, mark it.
 
 ---
 
-# jarvis-ubuntu (este fork)
+# jarvis-sapo (este fork)
 
 Fork de ethanplusai/jarvis para Ubuntu/Linux. Todo lo de arriba sigue valiendo; esto es lo que cambia.
 
