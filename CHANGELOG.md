@@ -3,6 +3,11 @@
 Fork de [ethanplusai/jarvis](https://github.com/ethanplusai/jarvis) (© 2026 Ethan Rogers) orientado a Ubuntu/Linux.
 Versionado semántico con prefijo `ubuntu-`. Uso personal y no comercial, igual que la licencia original.
 
+## ubuntu-0.10.0 — Router de preguntas y base de datos (fase R)
+- `agents/router.py`: decide a quién se pregunta solo con reglas, sin llamar a ningún modelo. Órdenes de casa → Home Assistant; imágenes de cámara y novedades → Gemini; razonamiento y textos largos → Claude; lo que no encaja → pregunta antes de gastar.
+- `agents/store.py`: base de datos SQLite con una fila por pregunta (destino, motivo, latencia, coste, valoración y si es repetida). Sin dependencias nuevas.
+- Tests con fakes en `tests/test_router.py`; ninguna llamada a red ni a modelos.
+
 ## ubuntu-0.9.0 — Acceso remoto seguro (F1)
 - Despliegue en CT dedicado (p.ej. CT 215) tras Caddy (`deploy/Caddyfile`): HTTPS interno (`tls internal`) y autenticación básica delante del proxy inverso.
 - El servidor (`jarvis-sapo.service`, `deploy/jarvis-sapo.service`) escucha solo en 127.0.0.1:8340; Caddy es la única entrada, con cabeceras de seguridad básicas.
