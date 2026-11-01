@@ -3,6 +3,10 @@
 Fork de [ethanplusai/jarvis](https://github.com/ethanplusai/jarvis) (© 2026 Ethan Rogers) orientado a Ubuntu/Linux.
 Versionado semántico con prefijo `ubuntu-`. Uso personal y no comercial, igual que la licencia original.
 
+## ubuntu-0.11.0 — Endpoint del router para Home Assistant
+- `router_api.py`: `POST /api/router/decide` decide el destino de una pregunta y la registra; `POST /api/router/rate` guarda si la respuesta fue buena. Se monta desde `server.py` con una sola llamada.
+- Las rutas quedan bajo la protección de origen de la aplicación y, desde la red, detrás de Caddy con autenticación.
+
 ## ubuntu-0.10.0 — Router de preguntas y base de datos (fase R)
 - `agents/router.py`: decide a quién se pregunta solo con reglas, sin llamar a ningún modelo. Órdenes de casa → Home Assistant; imágenes de cámara y novedades → Gemini; razonamiento y textos largos → Claude; lo que no encaja → pregunta antes de gastar.
 - `agents/store.py`: base de datos SQLite con una fila por pregunta (destino, motivo, latencia, coste, valoración y si es repetida). Sin dependencias nuevas.
