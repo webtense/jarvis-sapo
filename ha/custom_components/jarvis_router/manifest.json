@@ -1,0 +1,13 @@
+{
+  "domain": "jarvis_router",
+  "name": "JARVIS Router (Assist)",
+  "codeowners": ["@webtense"],
+  "config_flow": true,
+  "dependencies": ["conversation"],
+  "documentation": "https://github.com/webtense/jarvis-sapo/tree/main/ha/custom_components/jarvis_router",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.12.0"
+}

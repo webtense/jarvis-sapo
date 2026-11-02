@@ -3,6 +3,13 @@
 Fork de [ethanplusai/jarvis](https://github.com/ethanplusai/jarvis) (© 2026 Ethan Rogers) orientado a Ubuntu/Linux.
 Versionado semántico con prefijo `ubuntu-`. Uso personal y no comercial, igual que la licencia original.
 
+## ubuntu-0.12.0 — Router de preguntas conectado a Assist
+- `ha/custom_components/jarvis_router/`: agente de conversación «JARVIS Router» para Home Assistant. Cada frase pide destino a `POST /api/router/decide`: órdenes de casa van a Home Assistant (sin modelo), imágenes y novedades y razonamiento a Gemini, y «no encaja» hace que Assist pregunte «¿lo pregunto a Gemini o a Claude?» antes de gastar.
+- Claude no es agente de conversación en Home Assistant: las preguntas que el router manda a Claude las contesta Gemini con un aviso hablado, hasta que haya un agente de Claude.
+- Valoración: «bien» / «mal» tras una respuesta se guardan en `POST /api/router/rate`. Las preguntas pendientes y las últimas respuestas viven solo en memoria.
+- Credenciales del router en `/config/jarvis_router.netrc` (600) y CA en `/config/certs/jarvis-ca.crt`; el componente no las escribe en logs.
+- `tests/test_ha_router_logic.py`: lógica pura (lectura de la frase, elecciones, valoraciones, caducidad), sin HA ni red.
+
 ## ubuntu-0.11.0 — Endpoint del router para Home Assistant
 - `router_api.py`: `POST /api/router/decide` decide el destino de una pregunta y la registra; `POST /api/router/rate` guarda si la respuesta fue buena. Se monta desde `server.py` con una sola llamada.
 - Las rutas quedan bajo la protección de origen de la aplicación y, desde la red, detrás de Caddy con autenticación.
