@@ -8,6 +8,7 @@ en qué destino) y proponer cosas sin actuar sola. Solo SQLite estándar.
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,8 +47,11 @@ class QuestionStore:
         self.path = Path(path)
         if str(self.path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite3.connect(str(self.path))
+        # El servidor atiende peticiones en varios hilos: la conexión se comparte
+        # y cada operación se hace bajo el mismo candado.
+        self._db = sqlite3.connect(str(self.path), check_same_thread=False)
         self._db.row_factory = sqlite3.Row
+        self._lock = threading.Lock()
         self._db.executescript(SCHEMA)
 
     def close(self) -> None:
@@ -59,6 +63,10 @@ class QuestionStore:
         pregunta llegó en los últimos 5 minutos: suele significar que la primera
         respuesta no sirvió."""
         ts = time.time() if now is None else now
+        with self._lock:
+            return self._insert(text, route, reason, latency_ms, cost_usd, ts)
+
+    def _insert(self, text, route, reason, latency_ms, cost_usd, ts) -> int:
         repeated = self._db.execute(
             "SELECT 1 FROM questions WHERE text = ? AND ts >= ? LIMIT 1",
             (text, ts - 300),
@@ -73,16 +81,18 @@ class QuestionStore:
 
     def rate(self, question_id: int, good: bool) -> None:
         """Registra si la respuesta fue buena (tu «sí» o «perfecto») o mala («mal», «no»)."""
-        cur = self._db.execute(
-            "UPDATE questions SET ok = ? WHERE id = ?", (int(good), question_id)
-        )
-        self._db.commit()
+        with self._lock:
+            cur = self._db.execute(
+                "UPDATE questions SET ok = ? WHERE id = ?", (int(good), question_id)
+            )
+            self._db.commit()
         if cur.rowcount == 0:
             raise KeyError(f"no existe la pregunta {question_id}")
 
     def stats(self) -> list[RouteStats]:
         """Resumen por destino. Es lo que usará el aprendizaje."""
-        rows = self._db.execute(
+        with self._lock:
+            rows = self._db.execute(
             "SELECT route,"
             " COUNT(*) AS total,"
             " COUNT(ok) AS rated,"

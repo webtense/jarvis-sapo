@@ -1909,6 +1909,10 @@ app = FastAPI(title="JARVIS Server", version="0.1.0", lifespan=lifespan,
               redoc_url="/redoc" if _DEBUG_DOCS else None,
               openapi_url="/openapi.json" if _DEBUG_DOCS else None)
 
+# Router de preguntas: Home Assistant pregunta a qué destino va cada una.
+from router_api import mount_router_routes  # noqa: E402
+mount_router_routes(app)
+
 # No CORS at all, deliberately.
 #
 # It used to be `allow_origins=["*"]` with `allow_credentials=True`, which
